@@ -1,4 +1,4 @@
-import React_Projetct as agent
+import React_Project as agent
 
 
 def test_available_users_are_defined_for_simulated_multiuser_flow():

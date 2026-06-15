@@ -11,7 +11,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 @pytest.fixture(autouse=True)
 def clean_project_board():
-    import React_Projetct as agent
+    import React_Project as agent
 
     agent.project_board["tasks"].clear()
     agent.project_board["decisions"].clear()

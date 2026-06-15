@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Test/cache output
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Local environment files
+.env
+.env.*
+
+# Streamlit local settings
+.streamlit/secrets.toml
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

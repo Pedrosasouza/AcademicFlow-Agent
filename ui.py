@@ -1,5 +1,5 @@
 import streamlit as st
-import React_Projetct as react_agent
+import React_Project as react_agent
 from langchain_core.messages import AIMessage, HumanMessage
 from httpx import ConnectError
 
