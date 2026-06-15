@@ -36,6 +36,10 @@ project_board: dict[str, Any] = {
     "document_sections": {},
 }
 
+users = ["Alice", "Bob", "Charlie"]
+
+def get_users():
+    return users
 
 def _now() -> str:
     """Return a compact timestamp for records created by tools."""

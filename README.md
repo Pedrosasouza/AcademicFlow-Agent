@@ -84,31 +84,107 @@ academicflow-agent/
 
 ## Como Executar
 
-### 1. Instalar dependências
+### Pré-requisitos
+
+Certifique-se de ter instalado:
+- Python 3.8+
+- Ollama (download em [ollama.ai](https://ollama.ai))
+
+### Passo 1: Clonar ou acessar o projeto
 
 ```bash
-pip install langgraph langchain-ollama langchain-core httpx
+cd AcademicFlow-Agent
 ```
 
-### 2. Instalar o modelo local
+### Passo 2: Criar um ambiente virtual (opcional, mas recomendado)
+
+```bash
+python -m venv venv
+```
+
+**No Windows:**
+```bash
+venv\Scripts\activate
+```
+
+**No Linux/Mac:**
+```bash
+source venv/bin/activate
+```
+
+### Passo 3: Instalar as dependências
+
+```bash
+pip install langgraph langchain-ollama langchain-core httpx streamlit
+```
+
+### Passo 4: Baixar e configurar o modelo Ollama
+
+Primeiro, instale o Ollama (se ainda não tiver) em [ollama.ai](https://ollama.ai).
+
+Depois, em um terminal separado, puxe o modelo:
 
 ```bash
 ollama pull llama3.2
 ```
 
-### 3. Iniciar o Ollama
+### Passo 5: Iniciar o Ollama
+
+Em um terminal separado (manter aberto durante a execução do projeto):
 
 ```bash
 ollama serve
 ```
 
-### 4. Executar o projeto
+O Ollama será iniciado em `http://localhost:11434`
+
+### Passo 6: Executar a aplicação
+
+Com o Ollama rodando em outro terminal, execute:
 
 ```bash
-python main.py
+streamlit run ui.py
 ```
 
+A aplicação será aberta automaticamente no navegador em `http://localhost:8501`
+
 ---
+
+## Uso
+
+1. **Envie mensagens** para o agente utilizando o chat da interface Streamlit
+2. **O agente pode:**
+   - Registrar tarefas para o evento acadêmico
+   - Registrar decisões importantes
+   - Atualizar o documento colaborativo
+   - Consultar o estado atual do planejamento
+
+3. **Monitore as atividades** no painel lateral (sidebar) que mostra:
+   - Ferramentas chamadas pelo agente
+   - Resumo do quadro do projeto (tarefas, decisões, seções do documento)
+
+---
+
+## Estrutura dos Arquivos
+
+- **React_Projetct.py**: Contém o agente ReAct com LangGraph, definição das ferramentas e lógica do fluxo
+- **ui.py**: Interface Streamlit para interagir com o agente
+- **README.md**: Este arquivo
+
+---
+
+## Troubleshooting
+
+### Erro: "Connection refused" ao conectar com Ollama
+- Certifique-se de que o Ollama está rodando com `ollama serve` em outro terminal
+- Verifique se está acessível em `http://localhost:11434`
+
+### Erro: Modelo não encontrado
+- Execute `ollama pull llama3.2` para baixar o modelo
+
+### Interface Streamlit não abre
+- Verifique se está na pasta do projeto
+- Execute `streamlit run ui.py` com as dependências instaladas corretamente
 
 ## Exemplo de Uso
 
@@ -139,7 +215,6 @@ Agente: Exibe tarefas, decisões e seções registradas.
 ## Possíveis Melhorias Futuras
 
 - Persistência em banco de dados;
-- Interface web;
 - Múltiplos agentes especializados;
 - Integração com calendário;
 - Sistema de autenticação;
