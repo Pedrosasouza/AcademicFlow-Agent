@@ -167,7 +167,7 @@ A aplicação será aberta automaticamente no navegador em `http://localhost:850
 
 ## Estrutura dos Arquivos
 
-- **React_Projetct.py**: Contém o agente ReAct com LangGraph, definição das ferramentas e lógica do fluxo
+- **React_Project.py**: Contém o agente ReAct com LangGraph, definição das ferramentas e lógica do fluxo
 - **ui.py**: Interface Streamlit para interagir com o agente
 - **README.md**: Este arquivo
 
