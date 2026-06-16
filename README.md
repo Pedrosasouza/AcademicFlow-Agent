@@ -233,8 +233,6 @@ Agente: Exibe tarefas, decisões e seções registradas.
 
 ## Modelo 3C
 
-O AcademicFlow-Agent incorpora os três conceitos do modelo 3C dos Sistemas Colaborativos:
-
 ### Comunicação
 A comunicação ocorre através da interface de chat, permitindo que os participantes interajam com o agente e compartilhem informações sobre o planejamento do evento.
 
@@ -243,7 +241,5 @@ Os usuários trabalham sobre um quadro compartilhado do projeto, podendo registr
 
 ### Coordenação
 A coordenação é realizada pelo agente ReAct, que organiza o fluxo das atividades, registra responsabilidades, acompanha decisões e gerencia as informações do projeto por meio das ferramentas disponíveis.
-
-Dessa forma, o sistema oferece suporte à comunicação entre participantes, à colaboração em um objetivo comum e à coordenação das atividades necessárias para o planejamento do evento acadêmico.
 
 ---
