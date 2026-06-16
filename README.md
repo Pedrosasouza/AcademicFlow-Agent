@@ -231,11 +231,4 @@ Agente: Exibe tarefas, decisões e seções registradas.
 
 ---
 
-## Possíveis Melhorias Futuras
 
-- Persistência em banco de dados;
-- Múltiplos agentes especializados;
-- Integração com calendário;
-- Sistema de autenticação;
-- Memória vetorial;
-- Upload de arquivos e atas.
