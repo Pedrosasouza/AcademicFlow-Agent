@@ -42,7 +42,7 @@ Fluxo principal:
 ## Grafo LangGraph
 
 ---
-```mermaid
+```mermaid  
 flowchart TD
     START([START]) --> Agent[agent]
     Agent --> Decision{precisa usar ferramenta?}
