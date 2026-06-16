@@ -1,222 +1,221 @@
 # AcademicFlow-Agent
 
-Sistema colaborativo baseado em agentes de IA utilizando arquitetura ReAct com LangGraph para auxiliar no planejamento de eventos acadêmicos.
+Sistema colaborativo com agente ReAct usando LangGraph e Streamlit para apoiar
+o planejamento de eventos academicos.
 
-## Sobre o Projeto
+## Cenario Colaborativo
 
-O AcademicFlow-Agent é um protótipo de agente colaborativo capaz de auxiliar grupos durante o planejamento de eventos acadêmicos. O sistema utiliza um fluxo ReAct (Reason + Act), permitindo que o modelo de linguagem decida entre responder diretamente ao usuário ou executar ferramentas específicas para organizar informações do projeto.
+O AcademicFlow-Agent simula um grupo de estudantes ou organizadores planejando
+um evento academico. Os participantes podem conversar com o agente para
+registrar tarefas, guardar decisoes, criar secoes de um documento colaborativo
+e consultar o estado atual do planejamento.
 
-O agente pode:
+Usuarios simulados:
 
-- Registrar tarefas;
-- Registrar decisões importantes;
-- Atualizar seções de documentos colaborativos;
-- Consultar o estado atual do planejamento;
-- Auxiliar participantes durante discussões e organização do evento.
+- Alice
+- Bob
+- Charlie
 
-O foco principal do projeto é demonstrar a construção de agentes inteligentes utilizando LangGraph, integração com LLMs locais e uso de ferramentas em tempo de execução.
+Papel do agente:
 
----
+- apoiar a conversa do grupo;
+- transformar combinados em tarefas e decisoes;
+- organizar informacoes do projeto;
+- consultar o quadro atual quando solicitado;
+- sugerir proximos passos para a coordenacao do trabalho.
 
-## Arquitetura
+## Funcionamento Geral
 
-O sistema foi desenvolvido utilizando:
+O sistema usa um fluxo ReAct. A cada mensagem, o agente decide se deve responder
+diretamente ou chamar uma ferramenta. Quando uma ferramenta e chamada, ela
+atualiza a memoria simples do projeto e o resultado volta para o agente, que
+gera uma resposta final para o usuario.
 
-- ReAct Agent Pattern
-- LangGraph State Graph
-- Tool Calling
-- LLM local com Ollama
-- Memória simples em estrutura Python
+O estado do projeto e mantido em uma estrutura Python com:
 
-Fluxo principal:
+- tarefas;
+- decisoes;
+- secoes de documento colaborativo.
 
-1. Usuário envia uma mensagem;
-2. O agente interpreta a intenção;
-3. Decide entre:
-   - responder diretamente;
-   - chamar ferramentas;
-4. O estado do projeto é atualizado;
-5. O agente retorna uma resposta contextualizada.
+## Grafo LangGraph
 
----
+```mermaid
+flowchart TD
+    START([START]) --> Agent[agent]
+    Agent --> Decision{precisa usar ferramenta?}
+    Decision -->|nao| END([END])
+    Decision -->|sim| Tools[tools]
+    Tools --> Agent
+```
 
-## Funcionalidades
+Nos do sistema:
 
-### Registro de tarefas
-Permite adicionar tarefas com responsável, prazo e status.
+- `agent`: chama o modelo LLM com o prompt do sistema e o historico da conversa.
+- `tools`: executa ferramentas disponiveis para registrar tarefas, decisoes,
+  secoes de documento ou consultar o quadro do projeto.
 
-### Registro de decisões
-Armazena decisões importantes tomadas pelo grupo.
+O ciclo `tools -> agent` permite que o agente use o resultado da ferramenta para
+responder em linguagem natural.
 
-### Documento colaborativo
-Criação e atualização de seções do planejamento do evento.
+## Ferramentas
 
-### Consulta do quadro do projeto
-Resumo completo do estado atual do planejamento.
+As ferramentas implementadas em `React_Project.py` sao:
 
-### Fluxo ReAct
-O agente decide dinamicamente quando utilizar ferramentas.
+- `register_task`: registra uma tarefa com responsavel, prazo e status.
+- `register_decision`: registra uma decisao importante do grupo.
+- `update_document_section`: cria ou atualiza uma secao do documento colaborativo.
+- `consult_project_board`: retorna um resumo do estado atual do projeto.
 
----
+## Modelo 3C
 
-## Tecnologias Utilizadas
+### Comunicacao
+
+A comunicacao acontece pelo chat da interface Streamlit. Cada mensagem enviada
+ao agente fica associada ao usuario selecionado na sidebar.
+
+### Colaboracao
+
+A colaboracao aparece na construcao conjunta do planejamento. Os participantes
+podem pedir ao agente para criar tarefas, registrar decisoes e atualizar secoes
+do documento do evento.
+
+### Coordenacao
+
+A coordenacao acontece por meio do quadro do projeto. O agente organiza tarefas,
+responsaveis, prazos, decisoes e secoes do documento, permitindo que o grupo
+acompanhe o andamento do planejamento.
+
+## Estrutura do Projeto
+
+```text
+AcademicFlow-Agent/
+|-- React_Project.py
+|-- ui.py
+|-- README.md
+|-- TEST_ROTEIROS.md
+|-- requirements.txt
+|-- requirements-dev.txt
+|-- tests/
+|   |-- conftest.py
+|   |-- test_agent_configuration.py
+|   |-- test_collaboration_tools.py
+|-- logo.png
+```
+
+## Tecnologias
 
 - Python
+- Streamlit
 - LangGraph
 - LangChain
 - Ollama
 - Llama 3.2
-- HTTPX
-
----
-
-## Estrutura do Projeto
-
-```bash
-academicflow-agent/
-│
-├── React_Project.py
-├── README.md
-
-```
-
----
+- Pytest
 
 ## Como Executar
 
-### Pré-requisitos
+### 1. Criar ambiente virtual
 
-Certifique-se de ter instalado:
-- Python 3.8+
-- Ollama (download em [ollama.ai](https://ollama.ai))
-
-### Passo 1: Clonar ou acessar o projeto
-
-```bash
-cd AcademicFlow-Agent
-```
-
-### Passo 2: Criar um ambiente virtual (opcional, mas recomendado)
-
-```bash
+```powershell
 python -m venv venv
 ```
 
-**No Windows:**
-```bash
-venv\Scripts\activate
+Se o PowerShell bloquear a ativacao do ambiente, use os comandos com
+`.\venv\Scripts\python.exe` diretamente.
+
+### 2. Instalar dependencias
+
+```powershell
+.\venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-**No Linux/Mac:**
-```bash
-source venv/bin/activate
-```
+### 3. Baixar o modelo no Ollama
 
-### Passo 3: Instalar as dependências
-
-```bash
-pip install langgraph langchain-ollama langchain-core httpx streamlit
-```
-
-### Passo 4: Baixar e configurar o modelo Ollama
-
-Primeiro, instale o Ollama (se ainda não tiver) em [ollama.ai](https://ollama.ai).
-
-Depois, em um terminal separado, puxe o modelo:
-
-```bash
+```powershell
 ollama pull llama3.2
 ```
 
-### Passo 5: Iniciar o Ollama
+### 4. Iniciar o Ollama
 
-Em um terminal separado (manter aberto durante a execução do projeto):
+Em outro terminal:
 
-```bash
+```powershell
 ollama serve
 ```
 
-O Ollama será iniciado em `http://localhost:11434`
+### 5. Executar a interface
 
-### Passo 6: Executar a aplicação
-
-Com o Ollama rodando em outro terminal, execute:
-
-```bash
-streamlit run ui.py
+```powershell
+.\venv\Scripts\python.exe -m streamlit run ui.py
 ```
 
-A aplicação será aberta automaticamente no navegador em `http://localhost:8501`
-
----
-
-## Uso
-
-1. **Envie mensagens** para o agente utilizando o chat da interface Streamlit
-2. **O agente pode:**
-   - Registrar tarefas para o evento acadêmico
-   - Registrar decisões importantes
-   - Atualizar o documento colaborativo
-   - Consultar o estado atual do planejamento
-
-3. **Monitore as atividades** no painel lateral (sidebar) que mostra:
-   - Ferramentas chamadas pelo agente
-   - Resumo do quadro do projeto (tarefas, decisões, seções do documento)
-
----
-
-## Estrutura dos Arquivos
-
-- **React_Project.py**: Contém o agente ReAct com LangGraph, definição das ferramentas e lógica do fluxo
-- **ui.py**: Interface Streamlit para interagir com o agente
-- **README.md**: Este arquivo
-
----
-
-## Troubleshooting
-
-### Erro: "Connection refused" ao conectar com Ollama
-- Certifique-se de que o Ollama está rodando com `ollama serve` em outro terminal
-- Verifique se está acessível em `http://localhost:11434`
-
-### Erro: Modelo não encontrado
-- Execute `ollama pull llama3.2` para baixar o modelo
-
-### Interface Streamlit não abre
-- Verifique se está na pasta do projeto
-- Execute `streamlit run ui.py` com as dependências instaladas corretamente
-
-## Exemplo de Uso
+A aplicacao abrira em:
 
 ```text
-Grupo: Criar tarefa para reservar o auditório até sexta.
-Agente: Tarefa registrada com sucesso.
+http://localhost:8501
+```
+
+## Como Usar
+
+1. Selecione um usuario na sidebar.
+2. Envie uma mensagem no chat.
+3. Peca ao agente para registrar tarefas, decisoes ou secoes do documento.
+4. Consulte o quadro do projeto pela conversa ou pela sidebar.
+
+Exemplos:
+
+```text
+Crie uma tarefa para reservar o auditorio. Responsavel Alice. Prazo sexta-feira.
 ```
 
 ```text
-Grupo: Qual o estado atual do projeto?
-Agente: Exibe tarefas, decisões e seções registradas.
+Registre a decisao: o evento sera no auditorio principal. Motivo: comporta mais participantes.
 ```
 
----
+```text
+Qual o estado atual do projeto?
+```
 
-## Conceitos Demonstrados
+## Testes
 
-- Arquitetura de Agentes de IA
-- ReAct Pattern
-- Tool Calling
-- State Management
-- Planejamento colaborativo assistido por IA
-- Integração de LLM local
-- Fluxos multi-step com LangGraph
+O projeto possui testes unitarios para as ferramentas e configuracoes principais
+do agente. Eles nao chamam o Ollama e nao executam a interface Streamlit.
 
----
+Instale as dependencias de desenvolvimento:
 
-## Possíveis Melhorias Futuras
+```powershell
+.\venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+```
 
-- Persistência em banco de dados;
-- Múltiplos agentes especializados;
-- Integração com calendário;
-- Sistema de autenticação;
-- Memória vetorial;
-- Upload de arquivos e atas.
+Execute:
+
+```powershell
+.\venv\Scripts\python.exe -m pytest
+```
+
+Tambem ha roteiros de teste manual em `TEST_ROTEIROS.md`.
+
+## Solucao de Problemas
+
+### Erro de conexao com Ollama
+
+Verifique se o Ollama esta rodando:
+
+```powershell
+ollama serve
+```
+
+Se o modelo nao existir:
+
+```powershell
+ollama pull llama3.2
+```
+
+### Bloqueio do Activate.ps1 no PowerShell
+
+Use o Python do ambiente virtual diretamente:
+
+```powershell
+.\venv\Scripts\python.exe -m pytest
+.\venv\Scripts\python.exe -m streamlit run ui.py
+```
