@@ -72,13 +72,21 @@ O agente decide dinamicamente quando utilizar ferramentas.
 
 ## Estrutura do Projeto
 
-```bash
-academicflow-agent/
-│
-├── React_Project.py
-├── README.md
-
+```text
+AcademicFlow-Agent/
+|-- React_Project.py
+|-- ui.py
+|-- README.md
+|-- TEST_ROTEIROS.md
+|-- requirements.txt
+|-- requirements-dev.txt
+|-- tests/
+|   |-- conftest.py
+|   |-- test_agent_configuration.py
+|   |-- test_collaboration_tools.py
+|-- logo.png
 ```
+
 
 ---
 
