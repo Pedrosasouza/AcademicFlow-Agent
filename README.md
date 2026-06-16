@@ -39,6 +39,17 @@ Fluxo principal:
 5. O agente retorna uma resposta contextualizada.
 
 ---
+## Grafo LangGraph
+
+---
+```mermaid
+flowchart TD
+    START([START]) --> Agent[agent]
+    Agent --> Decision{precisa usar ferramenta?}
+    Decision -->|nao| END([END])
+    Decision -->|sim| Tools[tools]
+    Tools --> Agent
+```
 
 ## Funcionalidades
 
