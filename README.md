@@ -18,12 +18,12 @@
 
 O **AcademicFlow-Agent** é um sistema inteligente que utiliza o padrão **ReAct (Reason + Act)** para auxiliar equipes no planejamento de eventos acadêmicos. O agente analisa mensagens dos usuários, decide autonomamente quando usar ferramentas e mantém o estado do planejamento atualizado em tempo real.
 
-### Por que este projeto é relevante?
+### 🎯 Destaques do Projeto
 
-- Demonstra domínio de **arquitetura de agentes de IA** com orquestração via grafo de estados
-- Implementa **Tool Calling** — o agente decide dinamicamente quais ferramentas acionar
-- Utiliza **LLM local** (Ollama + Llama 3.2) — sem dependência de APIs pagas
-- Inclui **testes automatizados** para validar configuração e ferramentas
+- **Arquitetura de Agentes ReAct**: Orquestração orientada a grafos de estado com tomada de decisão dinâmica.
+- **Tool Calling Autônomo**: O modelo decide em tempo de execução quando acionar rotinas de persistência e colaboração.
+- **Privacidade & Execução Local**: Integração com Ollama (Llama 3.2), permitindo inferência local e sem custos de API.
+- **Cobertura de Testes**: Suíte de testes automatizados com pytest para validar ferramentas e configuração do agente.
 
 ---
 
