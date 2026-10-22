@@ -16,6 +16,11 @@ env/
 # Local environment files
 .env
 .env.*
+!.env.example
+
+# Local SQLite database files
+*.db
+*.sqlite3
 
 # Streamlit local settings
 .streamlit/secrets.toml

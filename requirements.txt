@@ -3,3 +3,6 @@ langchain-ollama
 langchain-core
 streamlit
 httpx
+sqlalchemy>=2.0
+psycopg[binary]>=3.1
+python-dotenv
