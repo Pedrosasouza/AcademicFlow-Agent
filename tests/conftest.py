@@ -16,15 +16,11 @@ def clean_project_board(monkeypatch):
     test_db_url = os.getenv("TEST_DATABASE_URL", "sqlite:///:memory:")
     monkeypatch.setenv("DATABASE_URL", test_db_url)
 
-    from src import agent, database, repository
+    from src import database, repository
 
     database.reset_engine()
     database.init_db()
     repository.clear_project_board()
-    if isinstance(agent.project_board, dict):
-        agent.project_board["tasks"].clear()
-        agent.project_board["decisions"].clear()
-        agent.project_board["document_sections"].clear()
     yield
     repository.clear_project_board()
     database.reset_engine()

@@ -1,58 +1,72 @@
 """
-Draft de sistema colaborativo com React Agent usando LangGraph.
+Sistema colaborativo com ReAct Agent usando LangGraph e persistencia relacional.
 
 Cenario escolhido:
     Planejamento colaborativo de um evento academico.
 
 O agente ajuda um grupo a conversar, registrar tarefas, registrar decisoes
-e consultar o quadro atual do planejamento. O foco deste prototipo e mostrar
-o fluxo React: o LLM decide se responde diretamente ou se chama uma ferramenta.
-
-Prerequisitos:
-    pip install langgraph langchain-ollama langchain-core
-    ollama pull llama3.2
+e consultar o quadro atual do planejamento. Os dados sao persistidos em banco
+de dados via SQLAlchemy 2.0 (PostgreSQL em producao/local e SQLite em testes).
 """
 
 from __future__ import annotations
 
-from datetime import datetime
 import os
 from typing import Any
 
+from dotenv import load_dotenv
 from httpx import ConnectError
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
 from langchain_ollama import ChatOllama
-from langgraph.graph import MessagesState, StateGraph, START
+from langgraph.graph import MessagesState, START, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
+from sqlalchemy.exc import OperationalError
+
+from src import repository
+from src.database import init_db
+
+load_dotenv()
 
 
 # =============================================================================
-# 1. MEMORIA SIMPLES DO PROJETO
+# 1. ADAPTADOR DE LEITURA DO QUADRO DO PROJETO (FONTE UNICA NO BANCO)
 # =============================================================================
 
-project_board: dict[str, Any] = {
-    "tasks": [],
-    "decisions": [],
-    "document_sections": {},
-}
 
-users: list[str] = ["Alice", "Bob", "Charlie"]
+class ProjectBoardView:
+    """Adaptador de leitura que consulta sempre o banco de dados como fonte unica da verdade."""
+
+    def to_dict(self) -> dict[str, Any]:
+        """Retorna um snapshot atualizado do quadro do projeto a partir do repositorio."""
+        return repository.get_project_board()
+
+    def __getitem__(self, key: str) -> Any:
+        return self.to_dict()[key]
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return self.to_dict().get(key, default)
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, dict):
+            return self.to_dict() == other
+        if isinstance(other, ProjectBoardView):
+            return self.to_dict() == other.to_dict()
+        return False
+
+
+project_board = ProjectBoardView()
 
 
 def get_users() -> list[str]:
-    """Return the list of available participants in the collaborative session."""
-    return users
-
-
-def _now() -> str:
-    """Return a compact timestamp for records created by tools."""
-    return datetime.now().strftime("%Y-%m-%d %H:%M")
+    """Retorna a lista de participantes disponiveis na sessao colaborativa."""
+    return repository.list_users()
 
 
 # =============================================================================
 # 2. FERRAMENTAS DO AGENTE
 # =============================================================================
+
 
 @tool
 def register_task(
@@ -64,21 +78,10 @@ def register_task(
 
     Use this when a participant asks to create, add, assign, or remember a task.
     """
-    owner = owner or "a definir"
-    deadline = deadline or "a definir"
-
-    task = {
-        "id": len(project_board["tasks"]) + 1,
-        "title": title,
-        "owner": owner,
-        "deadline": deadline,
-        "status": "pendente",
-        "created_at": _now(),
-    }
-    project_board["tasks"].append(task)
+    task = repository.create_task(title=title, owner=owner, deadline=deadline)
     return (
-        f"Tarefa #{task['id']} registrada: {title} | "
-        f"responsavel: {owner} | prazo: {deadline}."
+        f"Tarefa #{task['id']} registrada: {task['title']} | "
+        f"responsavel: {task['owner']} | prazo: {task['deadline']}."
     )
 
 
@@ -93,20 +96,20 @@ def update_task(
 
     Use this when a participant asks to complete, reassign, reschedule, or update a task.
     """
-    for task in project_board["tasks"]:
-        if task["id"] == task_id:
-            if status:
-                task["status"] = status
-            if owner:
-                task["owner"] = owner
-            if deadline:
-                task["deadline"] = deadline
-            return (
-                f"Tarefa #{task['id']} atualizada: {task['title']} | "
-                f"responsavel: {task['owner']} | prazo: {task['deadline']} | "
-                f"status: {task['status']}."
-            )
-    return f"Tarefa #{task_id} nao encontrada."
+    updated = repository.update_task_by_id(
+        task_id=task_id,
+        status=status,
+        owner=owner,
+        deadline=deadline,
+    )
+    if updated is None:
+        return f"Tarefa #{task_id} nao encontrada."
+
+    return (
+        f"Tarefa #{updated['id']} atualizada: {updated['title']} | "
+        f"responsavel: {updated['owner']} | prazo: {updated['deadline']} | "
+        f"status: {updated['status']}."
+    )
 
 
 @tool
@@ -115,15 +118,9 @@ def register_decision(decision: str, reason: str = "") -> str:
 
     Use this when participants agree on something that should be preserved.
     """
-    item = {
-        "id": len(project_board["decisions"]) + 1,
-        "decision": decision,
-        "reason": reason,
-        "created_at": _now(),
-    }
-    project_board["decisions"].append(item)
-    reason_text = f" Motivo: {reason}" if reason else ""
-    return f"Decisao #{item['id']} registrada: {decision}.{reason_text}"
+    item = repository.create_decision(decision=decision, reason=reason)
+    reason_text = f" Motivo: {item['reason']}" if item["reason"] else ""
+    return f"Decisao #{item['id']} registrada: {item['decision']}.{reason_text}"
 
 
 @tool
@@ -132,10 +129,7 @@ def update_document_section(section: str, text: str) -> str:
 
     Use this when the group asks to draft, rewrite, or save part of the event plan.
     """
-    project_board["document_sections"][section] = {
-        "text": text,
-        "updated_at": _now(),
-    }
+    repository.upsert_document_section(section=section, text_content=text)
     return f"Secao '{section}' atualizada com {len(text.split())} palavras."
 
 
@@ -145,9 +139,10 @@ def consult_project_board() -> str:
 
     Use this when participants ask for a summary, status, or current project board.
     """
-    tasks = project_board["tasks"]
-    decisions = project_board["decisions"]
-    sections = project_board["document_sections"]
+    board = repository.get_project_board()
+    tasks = board["tasks"]
+    decisions = board["decisions"]
+    sections = board["document_sections"]
 
     task_lines = [
         f"- #{task['id']} {task['title']} | {task['owner']} | "
@@ -220,6 +215,7 @@ llm = ChatOllama(
 # 4. GRAFO REACT COM LANGGRAPH
 # =============================================================================
 
+
 def agent(state: MessagesState) -> MessagesState:
     """Call the LLM. It may answer directly or request tool calls."""
     messages = [SystemMessage(content=SYSTEM_PROMPT)] + state["messages"]
@@ -239,8 +235,9 @@ react_event_agent = graph.compile()
 
 
 # =============================================================================
-# 5. LOOP DE CONVERSA
+# 5. LOOP DE CONVERSA (CLI)
 # =============================================================================
+
 
 def print_step(step: MessagesState) -> None:
     """Print relevant events from each graph step."""
@@ -260,17 +257,26 @@ def main() -> None:
     """Run the interactive CLI loop for the collaborative event planning agent."""
     print("=== React Agent Colaborativo: Planejamento de Evento ===")
     print("Digite 'exit' ou 'quit' para sair.\n")
-    print("Antes de conversar, confirme que o Ollama esta aberto.")
-    print("Comandos uteis: ollama serve | ollama pull llama3.2\n")
+    print("Antes de conversar, confirme que o PostgreSQL e o Ollama estao ativos.")
+    print("Comandos uteis: docker compose up -d | ollama serve | ollama pull llama3.2\n")
 
-    history = []
+    try:
+        init_db()
+    except OperationalError:
+        print("\nNao consegui conectar ao banco de dados PostgreSQL.")
+        print("Inicie o container com: docker compose up -d")
+        print("Ou verifique a variavel DATABASE_URL no seu arquivo .env.\n")
+        return
 
     while True:
         user_input = input("Grupo: ")
         if user_input.strip().lower() in {"exit", "quit"}:
             break
 
-        pending_history = [*history, ("user", user_input)]
+        context_history = repository.load_context_messages()
+        user_message = HumanMessage(content=user_input)
+        pending_history = [*context_history, user_message]
+        initial_count = len(context_history)
         step = None
 
         try:
@@ -278,16 +284,22 @@ def main() -> None:
                 {"messages": pending_history},
                 stream_mode="values",
             ):
-                print_step(step)
+                if len(step["messages"]) > initial_count + 1:
+                    print_step(step)
         except ConnectError:
             print("\nNao consegui conectar ao Ollama.")
             print("Abra outro terminal e execute: ollama serve")
             print("Se o modelo ainda nao existir, execute: ollama pull llama3.2")
             print("Depois rode este programa novamente.\n")
             break
+        except OperationalError:
+            print("\nErro de conexao com o banco de dados durante a execucao.")
+            print("Verifique se o container PostgreSQL continua ativo (docker compose ps).\n")
+            break
 
         if step is not None:
-            history = step["messages"]
+            new_messages = step["messages"][initial_count:]
+            repository.append_messages(new_messages)
         print()
 
 

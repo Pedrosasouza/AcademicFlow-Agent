@@ -1,4 +1,34 @@
-from src import agent
+from src import agent, repository
+
+
+def test_tools_persist_directly_to_database_single_source_of_truth():
+    """Garante que as tools gravam no banco via repository e que project_board le do banco."""
+    agent.register_task.invoke(
+        {
+            "title": "Validar persistencia no banco",
+            "owner": "Alice",
+            "deadline": "hoje",
+        }
+    )
+    agent.register_decision.invoke(
+        {
+            "decision": "Usar PostgreSQL",
+            "reason": "Persistencia compartilhada",
+        }
+    )
+    agent.update_document_section.invoke(
+        {
+            "section": "Infraestrutura",
+            "text": "Banco relacional com SQLAlchemy 2.0.",
+        }
+    )
+
+    db_board = repository.get_project_board()
+    assert len(db_board["tasks"]) == 1
+    assert db_board["tasks"][0]["title"] == "Validar persistencia no banco"
+    assert len(db_board["decisions"]) == 1
+    assert "Infraestrutura" in db_board["document_sections"]
+    assert agent.project_board.to_dict() == db_board
 
 
 def test_register_task_adds_task_with_given_fields():
