@@ -1,4 +1,4 @@
-import React_Project as agent
+from src import agent
 
 
 def test_register_task_adds_task_with_given_fields():
@@ -24,6 +24,37 @@ def test_register_task_uses_default_owner_and_deadline():
     task = agent.project_board["tasks"][0]
     assert task["owner"] == "a definir"
     assert task["deadline"] == "a definir"
+
+
+def test_update_task_modifies_existing_task_fields():
+    agent.register_task.invoke(
+        {
+            "title": "Reservar auditorio",
+            "owner": "Alice",
+            "deadline": "sexta-feira",
+        }
+    )
+
+    result = agent.update_task.invoke(
+        {
+            "task_id": 1,
+            "status": "concluida",
+            "owner": "Bob",
+            "deadline": "quinta-feira",
+        }
+    )
+
+    task = agent.project_board["tasks"][0]
+    assert "Tarefa #1 atualizada" in result
+    assert task["status"] == "concluida"
+    assert task["owner"] == "Bob"
+    assert task["deadline"] == "quinta-feira"
+
+
+def test_update_task_returns_not_found_for_invalid_id():
+    result = agent.update_task.invoke({"task_id": 99, "status": "concluida"})
+
+    assert result == "Tarefa #99 nao encontrada."
 
 
 def test_register_decision_adds_decision_with_reason():

@@ -16,6 +16,7 @@ Prerequisitos:
 from __future__ import annotations
 
 from datetime import datetime
+import os
 from typing import Any
 
 from httpx import ConnectError
@@ -36,10 +37,13 @@ project_board: dict[str, Any] = {
     "document_sections": {},
 }
 
-users = ["Alice", "Bob", "Charlie"]
+users: list[str] = ["Alice", "Bob", "Charlie"]
 
-def get_users():
+
+def get_users() -> list[str]:
+    """Return the list of available participants in the collaborative session."""
     return users
+
 
 def _now() -> str:
     """Return a compact timestamp for records created by tools."""
@@ -76,6 +80,33 @@ def register_task(
         f"Tarefa #{task['id']} registrada: {title} | "
         f"responsavel: {owner} | prazo: {deadline}."
     )
+
+
+@tool
+def update_task(
+    task_id: int,
+    status: str | None = None,
+    owner: str | None = None,
+    deadline: str | None = None,
+) -> str:
+    """Update an existing planning task's status, owner, or deadline.
+
+    Use this when a participant asks to complete, reassign, reschedule, or update a task.
+    """
+    for task in project_board["tasks"]:
+        if task["id"] == task_id:
+            if status:
+                task["status"] = status
+            if owner:
+                task["owner"] = owner
+            if deadline:
+                task["deadline"] = deadline
+            return (
+                f"Tarefa #{task['id']} atualizada: {task['title']} | "
+                f"responsavel: {task['owner']} | prazo: {task['deadline']} | "
+                f"status: {task['status']}."
+            )
+    return f"Tarefa #{task_id} nao encontrada."
 
 
 @tool
@@ -150,6 +181,7 @@ def consult_project_board() -> str:
 
 tools = [
     register_task,
+    update_task,
     register_decision,
     update_document_section,
     consult_project_board,
@@ -174,8 +206,14 @@ ou organizar informacoes do projeto. Depois de usar uma ferramenta, explique
 em linguagem natural o que foi feito e sugira o proximo passo colaborativo.
 """.strip()
 
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2")
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
-llm = ChatOllama(model="llama3.2").bind_tools(tools)
+llm = ChatOllama(
+    model=OLLAMA_MODEL,
+    base_url=OLLAMA_BASE_URL,
+    temperature=0,
+).bind_tools(tools)
 
 
 # =============================================================================
@@ -219,6 +257,7 @@ def print_step(step: MessagesState) -> None:
 
 
 def main() -> None:
+    """Run the interactive CLI loop for the collaborative event planning agent."""
     print("=== React Agent Colaborativo: Planejamento de Evento ===")
     print("Digite 'exit' ou 'quit' para sair.\n")
     print("Antes de conversar, confirme que o Ollama esta aberto.")
@@ -231,11 +270,12 @@ def main() -> None:
         if user_input.strip().lower() in {"exit", "quit"}:
             break
 
-        history.append(("user", user_input))
+        pending_history = [*history, ("user", user_input)]
+        step = None
 
         try:
             for step in react_event_agent.stream(
-                {"messages": history},
+                {"messages": pending_history},
                 stream_mode="values",
             ):
                 print_step(step)
@@ -246,7 +286,8 @@ def main() -> None:
             print("Depois rode este programa novamente.\n")
             break
 
-        history = step["messages"]
+        if step is not None:
+            history = step["messages"]
         print()
 
 

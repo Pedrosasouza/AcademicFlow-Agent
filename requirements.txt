@@ -1,0 +1,5 @@
+langgraph
+langchain-ollama
+langchain-core
+streamlit
+httpx

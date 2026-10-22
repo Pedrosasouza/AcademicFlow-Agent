@@ -8,7 +8,7 @@ AcademicFlow-Agent. Os testes unitarios automatizados ficam na pasta `tests/`.
 **Objetivo:** verificar se a interface permite enviar mensagens identificadas por usuario.
 
 **Pre-condicoes:**
-- Streamlit executando com `streamlit run ui.py`.
+- Streamlit executando com `streamlit run src/ui.py`.
 - Ollama executando com `ollama serve`.
 - Modelo `llama3.2` instalado.
 
@@ -24,18 +24,19 @@ AcademicFlow-Agent. Os testes unitarios automatizados ficam na pasta `tests/`.
 - Cada mensagem enviada ao agente contem identificacao do usuario no historico.
 - O agente responde sem perder o contexto da conversa.
 
-## Template 2 - Coordenacao por registro de tarefas
+## Template 2 - Coordenacao por registro e atualizacao de tarefas
 
-**Objetivo:** verificar se o agente consegue registrar tarefas do planejamento.
+**Objetivo:** verificar se o agente consegue registrar e atualizar tarefas do planejamento.
 
 **Passos:**
 1. Enviar: `Crie uma tarefa para reservar o auditorio. Responsavel Alice. Prazo sexta-feira.`
 2. Observar a sidebar em `Quadro do projeto`.
+3. Enviar: `Atualize a tarefa #1 para o status concluida.`
 
 **Resultado esperado:**
-- A ferramenta `register_task` e chamada.
+- As ferramentas `register_task` e `update_task` sao chamadas.
 - O contador de tarefas aumenta.
-- A tarefa aparece com titulo, responsavel e prazo.
+- A tarefa aparece na sidebar com titulo, responsavel, prazo e status atualizado (`concluida`).
 
 ## Template 3 - Colaboracao por registro de decisoes
 
@@ -47,7 +48,7 @@ AcademicFlow-Agent. Os testes unitarios automatizados ficam na pasta `tests/`.
 
 **Resultado esperado:**
 - A ferramenta `register_decision` e chamada.
-- A decisao aparece no resumo do projeto.
+- A decisao aparece no resumo do projeto na sidebar.
 - O agente usa a decisao registrada ao responder sobre o estado atual.
 
 ## Template 4 - Documento colaborativo
@@ -60,7 +61,7 @@ AcademicFlow-Agent. Os testes unitarios automatizados ficam na pasta `tests/`.
 
 **Resultado esperado:**
 - A ferramenta `update_document_section` e chamada.
-- O quadro mostra uma secao chamada `Objetivos`.
+- O quadro lateral mostra uma secao chamada `Objetivos` com seu conteudo.
 - A consulta informa que existe uma secao registrada.
 
 ## Template 5 - Recuperacao apos erro de Ollama
@@ -69,25 +70,25 @@ AcademicFlow-Agent. Os testes unitarios automatizados ficam na pasta `tests/`.
 
 **Passos:**
 1. Fechar o processo do Ollama.
-2. Executar a interface Streamlit.
+2. Executar a interface Streamlit (`streamlit run src/ui.py`).
 3. Enviar qualquer mensagem no chat.
 
 **Resultado esperado:**
-- A interface exibe uma mensagem de erro orientando a executar `ollama serve`.
+- A interface mantem a sidebar e o historico visiveis e exibe uma mensagem de erro orientando a executar `ollama serve`.
 - A aplicacao nao quebra com traceback visivel para o usuario final.
 
 ## Como Rodar os Testes Unitarios
 
-Instale as dependencias principais e o pytest:
+Instale as dependencias de desenvolvimento:
 
 ```powershell
-pip install langgraph langchain-ollama langchain-core httpx streamlit pytest
+pip install -r requirements-dev.txt
 ```
 
 Execute:
 
 ```powershell
-pytest
+pytest -v
 ```
 
 Os testes unitarios nao chamam o Ollama e nao executam a interface Streamlit.
