@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 import sys
 
@@ -10,13 +11,20 @@ if str(PROJECT_ROOT) not in sys.path:
 
 
 @pytest.fixture(autouse=True)
-def clean_project_board():
-    from src import agent
+def clean_project_board(monkeypatch):
+    """Isola cada teste em um banco limpo (SQLite in-memory por padrao ou TEST_DATABASE_URL)."""
+    test_db_url = os.getenv("TEST_DATABASE_URL", "sqlite:///:memory:")
+    monkeypatch.setenv("DATABASE_URL", test_db_url)
 
-    agent.project_board["tasks"].clear()
-    agent.project_board["decisions"].clear()
-    agent.project_board["document_sections"].clear()
+    from src import agent, database, repository
+
+    database.reset_engine()
+    database.init_db()
+    repository.clear_project_board()
+    if isinstance(agent.project_board, dict):
+        agent.project_board["tasks"].clear()
+        agent.project_board["decisions"].clear()
+        agent.project_board["document_sections"].clear()
     yield
-    agent.project_board["tasks"].clear()
-    agent.project_board["decisions"].clear()
-    agent.project_board["document_sections"].clear()
+    repository.clear_project_board()
+    database.reset_engine()
