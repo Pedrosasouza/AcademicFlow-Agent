@@ -230,3 +230,61 @@ def test_clear_project_board_resets_data_and_preserves_users():
     assert board == {"tasks": [], "decisions": [], "document_sections": {}}
     assert repository.load_messages() == []
     assert repository.list_users() == ["Alice", "Bob", "Charlie"]
+
+
+def test_ui_helpers_extract_tools_and_reset_database_state():
+    """Valida que os helpers da UI extraem ferramentas do historico do banco e limpam a sessao."""
+    from src import ui
+
+    repository.create_task(title="Configurar projetor", owner="Charlie")
+    repository.append_messages(
+        [
+            HumanMessage(content="[user:Charlie] Configure o projetor"),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "register_task",
+                        "args": {"title": "Configurar projetor"},
+                        "id": "call_proj_1",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            ToolMessage(content="Tarefa #1 registrada", tool_call_id="call_proj_1"),
+            AIMessage(content="Tarefa registrada com sucesso."),
+        ]
+    )
+
+    loaded = repository.load_messages()
+    assert ui._extract_tools_called(loaded) == {"register_task"}
+
+    ui._reset_session()
+    assert repository.get_project_board()["tasks"] == []
+    assert repository.load_messages() == []
+
+
+def test_clear_project_board_executes_truncate_restart_identity_on_postgresql(monkeypatch):
+    """Garante que no dialeto postgresql o clear_project_board usa TRUNCATE ... RESTART IDENTITY."""
+    from unittest.mock import MagicMock
+
+    mock_engine = MagicMock()
+    mock_engine.dialect.name = "postgresql"
+    mock_session = MagicMock()
+
+    @database.contextmanager
+    def fake_session():
+        yield mock_session
+
+    monkeypatch.setattr(repository, "init_db", lambda: None)
+    monkeypatch.setattr(repository, "get_engine", lambda: mock_engine)
+    monkeypatch.setattr(repository, "get_db_session", fake_session)
+
+    repository.clear_project_board()
+
+    assert mock_session.execute.call_count == 1
+    executed_clause = str(mock_session.execute.call_args[0][0])
+    assert "TRUNCATE TABLE tasks, decisions, document_sections, chat_messages" in executed_clause
+    assert "RESTART IDENTITY CASCADE" in executed_clause
+
+

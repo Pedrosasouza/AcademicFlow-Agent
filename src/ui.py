@@ -1,21 +1,27 @@
+from __future__ import annotations
+
+from collections.abc import Sequence
 from pathlib import Path
 import sys
 
-import streamlit as st
-from langchain_core.messages import AIMessage, HumanMessage
 from httpx import ConnectError
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from sqlalchemy.exc import OperationalError
+import streamlit as st
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src import agent as react_agent
+from src import repository
+from src.database import init_db
 
 LOGO_PATH = PROJECT_ROOT / "assets" / "logo.png"
 
 
-def _message_role(message) -> str | None:
-    """Return the chat role ('user' or 'assistant') for displayable messages."""
+def _message_role(message: BaseMessage) -> str | None:
+    """Retorna o papel no chat ('user' ou 'assistant') apenas para mensagens exibiveis."""
     if isinstance(message, HumanMessage):
         return "user"
     if isinstance(message, AIMessage):
@@ -25,25 +31,38 @@ def _message_role(message) -> str | None:
     return None
 
 
+def _extract_tools_called(messages: Sequence[BaseMessage]) -> set[str]:
+    """Extrai o conjunto de nomes de ferramentas invocadas a partir do historico de mensagens."""
+    called: set[str] = set()
+    for msg in messages:
+        if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
+            for tool_call in msg.tool_calls:
+                name = tool_call.get("name")
+                if name:
+                    called.add(name)
+    return called
+
+
 def _render_tools_called() -> None:
-    """Render badges in the sidebar for each tool invoked during the session."""
+    """Renderiza badges na barra lateral para cada ferramenta acionada na sessao."""
     with st.sidebar:
-        for tool_name in st.session_state.tools_called:
+        for tool_name in sorted(st.session_state.tools_called):
             st.badge(f"Ferramenta chamada: {tool_name}", color="orange")
 
 
 def _reset_session() -> None:
-    """Clear message history, called tools, and the shared project board."""
-    react_agent.project_board["tasks"].clear()
-    react_agent.project_board["decisions"].clear()
-    react_agent.project_board["document_sections"].clear()
-    st.session_state.messages = []
-    st.session_state.tools_called = set()
-    st.session_state.project_board = react_agent.project_board
+    """Limpa tarefas, decisoes, secoes e historico de chat persistidos no banco de dados."""
+    repository.clear_project_board()
+    if "messages" in st.session_state:
+        st.session_state.messages = []
+    if "tools_called" in st.session_state:
+        st.session_state.tools_called = set()
+    if "project_board" in st.session_state:
+        st.session_state.project_board = repository.get_project_board()
 
 
-def _render_user_chooser() -> None:
-    """Render the participant selector and session reset button in the sidebar."""
+def _render_user_chooser(usuarios: list[str]) -> None:
+    """Renderiza o seletor de participante e o botao de limpeza na barra lateral."""
     with st.sidebar:
         user = st.selectbox("Selecione o usuário", usuarios)
         st.session_state.current_user = user
@@ -53,7 +72,7 @@ def _render_user_chooser() -> None:
 
 
 def _render_board_summary() -> None:
-    """Render the project board metrics, tasks, decisions, and document sections."""
+    """Renderiza as metricas, tarefas, decisoes e secoes do quadro do projeto."""
     with st.sidebar:
         st.markdown("### Quadro do projeto")
         board = st.session_state.project_board
@@ -97,7 +116,7 @@ def _render_board_summary() -> None:
 
 
 def _render_chat_history() -> None:
-    """Render user and final assistant messages in the main chat container."""
+    """Renderiza as mensagens do usuario e respostas finais do assistente no chat."""
     for message in st.session_state.messages:
         role = _message_role(message)
         if role is None:
@@ -107,99 +126,110 @@ def _render_chat_history() -> None:
             st.markdown(message.content)
 
 
-def _ensure_session_state() -> None:
-    """Ensure required keys exist in Streamlit session_state on startup."""
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-    if "project_board" not in st.session_state:
-        st.session_state.project_board = react_agent.project_board
-    if "tools_called" not in st.session_state:
-        st.session_state.tools_called = set()
-    if "current_user" not in st.session_state:
+def _sync_session_state_from_db(usuarios: list[str]) -> None:
+    """Sincroniza o session_state do Streamlit com os dados persistidos no banco relacional."""
+    messages = repository.load_messages()
+    st.session_state.messages = messages
+    st.session_state.project_board = repository.get_project_board()
+    st.session_state.tools_called = _extract_tools_called(messages)
+    if "current_user" not in st.session_state and usuarios:
         st.session_state.current_user = usuarios[0]
 
 
-def _bind_project_board() -> None:
-    """Bind the session_state project board reference to the agent module's board."""
-    st.session_state.project_board = react_agent.project_board
+def render_app() -> None:
+    """Ponto de entrada principal da interface Streamlit."""
+    st.set_page_config(
+        page_title="Assistente de Planejamento de Evento",
+        page_icon="📅",
+        layout="centered",
+    )
+
+    st.title("📅 AcademicFlow-Agent")
+    st.markdown("---")
+
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        st.markdown(
+            """
+        **SSC0528 - Sistemas Colaborativos: Fundamentos e Aplicações**
+        """
+        )
+        st.image(str(LOGO_PATH), width=200)
+    with col2:
+        st.markdown(
+            """
+        **Alunos:**
+        - Pedro Eduardo Moreira Chamone
+        - Pedro Santos Souza
+        """
+        )
+
+    st.markdown("---")
+    st.markdown(
+        """
+    Sistema colaborativo baseado em agentes de IA para auxiliar no planejamento de eventos acadêmicos.
+    Utilize o chat abaixo para interagir com o assistente.
+    """
+    )
+    st.markdown("---")
+
+    try:
+        init_db()
+        usuarios = react_agent.get_users()
+        _sync_session_state_from_db(usuarios)
+    except OperationalError:
+        st.error(
+            "Não foi possível conectar ao banco de dados PostgreSQL. "
+            "Verifique se o container está em execução com `docker compose up -d` "
+            "e confira a variável `DATABASE_URL` no arquivo `.env`."
+        )
+        st.stop()
+
+    _render_user_chooser(usuarios)
+    _render_board_summary()
+    _render_tools_called()
+    _render_chat_history()
+
+    user_prompt = st.chat_input("Escreva sua mensagem para o agente...")
+
+    if user_prompt:
+        sender = st.session_state.get("current_user") or "Usuário Desconhecido"
+        context_messages = repository.load_context_messages()
+        user_msg = HumanMessage(content=f"[user:{sender}] {user_prompt}")
+        pending_messages = [*context_messages, user_msg]
+        initial_count = len(context_messages)
+
+        with st.spinner("Processando com o agente..."):
+            final_step = None
+            try:
+                for step in react_agent.react_event_agent.stream(
+                    {"messages": pending_messages},
+                    stream_mode="values",
+                ):
+                    final_step = step
+                    if len(step["messages"]) > initial_count + 1:
+                        react_agent.print_step(step)
+
+            except ConnectError:
+                st.error(
+                    "Não consegui conectar ao Ollama. Verifique se o serviço está ativo com `ollama serve` e se o modelo `llama3.2` foi baixado."
+                )
+                st.stop()
+            except OperationalError:
+                st.error(
+                    "Falha de comunicação com o banco de dados PostgreSQL durante o processamento."
+                )
+                st.stop()
+
+            if final_step:
+                new_messages = final_step["messages"][initial_count:]
+                repository.append_messages(new_messages)
+            _sync_session_state_from_db(usuarios)
+            st.rerun()
 
 
-st.set_page_config(
-    page_title="Assistente de Planejamento de Evento",
-    page_icon="📅",
-    layout="centered",
-)
+from streamlit.runtime.scriptrunner import get_script_run_ctx
 
-usuarios = react_agent.get_users()
-_ensure_session_state()
 
-# ============================================================================
-# SEÇÃO DE INFORMAÇÕES DO TRABALHO
-# ============================================================================
-
-st.title("📅 AcademicFlow-Agent")
-st.markdown("---")
-
-col1, col2 = st.columns([2, 1])
-with col1:
-    st.markdown("""
-    **SSC0528 - Sistemas Colaborativos: Fundamentos e Aplicações**
-    """)
-    st.image(str(LOGO_PATH), width=200)
-with col2:
-    st.markdown("""
-    **Alunos:**
-    - Pedro Eduardo Moreira Chamone
-    - Pedro Santos Souza
-    """)
-
-st.markdown("---")
-st.markdown("""
-Sistema colaborativo baseado em agentes de IA para auxiliar no planejamento de eventos acadêmicos.
-Utilize o chat abaixo para interagir com o assistente.
-""")
-st.markdown("---")
-
-_render_user_chooser()
-_render_board_summary()
-_render_tools_called()
-_render_chat_history()
-
-user_prompt = st.chat_input("Escreva sua mensagem para o agente...")
-
-if user_prompt:
-
-    # Identificar qual usuário enviou a mensagem (preferir seleção em sidebar)
-    sender = st.session_state.get("current_user") or "Usuário Desconhecido"
-    pending_messages = [
-        *st.session_state.messages,
-        HumanMessage(content=f"[user:{sender}] {user_prompt}"),
-    ]
-
-    with st.spinner("Processando com o agente..."):
-        final_step = None
-        try:
-            for step in react_agent.react_event_agent.stream(
-                {"messages": pending_messages},
-                stream_mode="values"
-            ):
-                final_step = step
-                react_agent.print_step(step)
-
-                if final_step:
-                    msg = step["messages"][-1]
-                    role = getattr(msg, "type", "unknown")
-
-                    if role == "ai" and getattr(msg, "tool_calls", None):
-                        for tool_call in msg.tool_calls:
-                            st.session_state.tools_called.add(tool_call["name"])
-
-        except ConnectError:
-            st.error(
-                "Não consegui conectar ao Ollama. Verifique se o serviço está ativo com `ollama serve` e se o modelo `llama3.2` foi baixado."
-            )
-            st.stop()
-        if final_step:
-            st.session_state.messages = final_step["messages"]
-        _bind_project_board()
-        st.rerun()
+if __name__ == "__main__" or get_script_run_ctx() is not None:
+    render_app()
