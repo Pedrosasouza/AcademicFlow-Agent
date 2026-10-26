@@ -429,14 +429,28 @@ def test_compute_embedding_uses_ollama_and_supports_arbitrary_vocabulary(monkeyp
     from unittest.mock import MagicMock
 
     fake_embedder = MagicMock()
-    fake_embedder.embed_query.return_value = [1.0, 0.5, 0.0]
+    fake_embedder.embed_query.return_value = [1.0, 0.5] + [0.0] * (models.EMBEDDING_DIM - 2)
+    captured_kwargs: dict[str, str] = {}
+
+    def make_embedder(**kwargs):
+        captured_kwargs.update(kwargs)
+        return fake_embedder
 
     monkeypatch.setenv("EMBEDDING_PROVIDER", "ollama")
-    monkeypatch.setattr(database, "OllamaEmbeddings", lambda **kwargs: fake_embedder)
+    monkeypatch.setenv("OLLAMA_MODEL", "llama3.2")
+    monkeypatch.delenv("OLLAMA_EMBEDDING_MODEL", raising=False)
+    database._get_ollama_embedder.cache_clear()
+    monkeypatch.setattr(database, "OllamaEmbeddings", make_embedder)
 
     vec = database.compute_embedding("regras de patrocinio corporativo")
     assert fake_embedder.embed_query.called
+    assert captured_kwargs["model"] == "nomic-embed-text"
     assert len(vec) == models.EMBEDDING_DIM
+
+    # Se o modelo retornar dimensao diferente de 768, deve falhar explicitamente em vez de dobrar
+    fake_embedder.embed_query.return_value = [1.0, 0.5, 0.0]
+    with pytest.raises(ValueError, match="retornou 3 dimensoes"):
+        database.compute_embedding("vetor com dimensao errada")
 
     # Em modo offline/trigram, consultas para termos novos (ex.: patrocinio) devem funcionar sem dicionario fixo
     monkeypatch.setenv("EMBEDDING_PROVIDER", "trigram")
@@ -449,6 +463,30 @@ def test_compute_embedding_uses_ollama_and_supports_arbitrary_vocabulary(monkeyp
     assert len(matches) == 1
     assert "Patrocinio" in matches[0]["title"]
     assert matches[0]["score"] > 0.3
+
+
+def test_run_migrations_stamps_legacy_db_without_dropping_data(monkeypatch, tmp_path):
+    """Garante que um banco pre-existente sem alembic_version recebe stamp e preserva seus dados."""
+    from sqlalchemy import text
+
+    db_file = tmp_path / "legacy_preserve.sqlite3"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_file.as_posix()}")
+    database.reset_engine()
+
+    engine = database.get_engine()
+    models.Base.metadata.create_all(bind=engine)
+    with database.get_db_session() as session:
+        session.add(models.UserModel(name="Diana"))
+
+    database.run_migrations("head")
+
+    with database.get_db_session() as session:
+        users = session.scalars(select(models.UserModel.name)).all()
+    assert "Diana" in users
+
+    with engine.connect() as conn:
+        version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
+    assert version == "0001_initial_schema"
 
 
 def test_alembic_migrations_upgrade_and_downgrade_cleanly(monkeypatch, tmp_path):
@@ -537,6 +575,42 @@ def test_compute_embedding_logs_warning_on_ollama_connection_error(monkeypatch, 
 
     assert len(vec) == models.EMBEDDING_DIM
     assert "Falha ao gerar embedding via Ollama" in caplog.text
+
+
+def test_upsert_document_section_recovers_from_concurrent_integrity_error(monkeypatch):
+    """Garante que upsert_document_section trata IntegrityError concorrente atualizando o registro existente."""
+    from sqlalchemy.exc import IntegrityError
+
+    # Pre-insere a secao no banco real
+    repository.upsert_document_section("Cronograma", "Versao Inicial", session_id="default")
+
+    real_get_db_session = repository.get_db_session
+
+    @database.contextmanager
+    def race_condition_session():
+        with real_get_db_session() as session:
+            real_scalar = session.scalar
+            calls = {"count": 0}
+
+            def simulated_scalar(stmt, *args, **kwargs):
+                calls["count"] += 1
+                # Na primeira leitura (check de existencia), finge que ainda nao existia (simulando corrida)
+                if calls["count"] == 1:
+                    return None
+                return real_scalar(stmt, *args, **kwargs)
+
+            monkeypatch.setattr(session, "scalar", simulated_scalar)
+            yield session
+
+    monkeypatch.setattr(repository, "get_db_session", race_condition_session)
+
+    result = repository.upsert_document_section(
+        "Cronograma",
+        "Versao Atualizada Apos Corrida",
+        session_id="default",
+    )
+    assert result["text"] == "Versao Atualizada Apos Corrida"
+
 
 
 

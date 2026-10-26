@@ -5,13 +5,15 @@ Camada de repositorio (Data Access Layer) centralizando todas as operacoes no ba
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import date, datetime
+from datetime import date, datetime, timezone
+import logging
 import math
 import re
 from typing import Any
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
-from sqlalchemy import delete, select, text
+from sqlalchemy import delete, func, select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from src import database
@@ -32,26 +34,29 @@ from src.models import (
     UserModel,
 )
 
+logger = logging.getLogger(__name__)
+
 MAX_CONTEXT_MESSAGES = 20
 _LEGACY_USER_PREFIX_RE = re.compile(r"^\[user:([^\]]+)\]\s*(.*)$", re.DOTALL)
 _ISO_DATE_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}")
 
 
 def _now() -> str:
-    """Retorna timestamp compacto no formato esperado pelas ferramentas do agente."""
-    return datetime.now().strftime("%Y-%m-%d %H:%M")
+    """Retorna timestamp UTC compacto no formato esperado pelas ferramentas do agente."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
 
 
 def _resolve_user(session: Session, raw_name: str | None) -> tuple[str, int | None]:
-    """Resolve o nome normalizado e o ID relacional (FK) caso coincida com um usuario cadastrado."""
+    """Resolve o nome normalizado e o ID relacional (FK) filtrando diretamente via SQL."""
     cleaned = (raw_name or "").strip()
     if not cleaned:
         return "a definir", None
 
-    users = session.scalars(select(UserModel)).all()
-    for user in users:
-        if user.name.lower() == cleaned.lower():
-            return user.name, user.id
+    user = session.scalar(
+        select(UserModel).where(func.lower(UserModel.name) == cleaned.lower())
+    )
+    if user is not None:
+        return user.name, user.id
     return cleaned, None
 
 
@@ -358,7 +363,7 @@ def upsert_document_section(
     text_content: str,
     session_id: str = "default",
 ) -> dict[str, Any]:
-    """Cria ou atualiza uma secao do documento colaborativo na sessao sem duplicar registros."""
+    """Cria ou atualiza uma secao do documento colaborativo tratando corridas de IntegrityError."""
     now_str = _now()
     with get_db_session() as session:
         existing = session.scalar(
@@ -368,18 +373,37 @@ def upsert_document_section(
             )
         )
         if existing is None:
-            existing = DocumentSectionModel(
-                session_id=session_id,
-                section=section,
-                text=text_content,
-                updated_at=now_str,
-            )
-            session.add(existing)
+            try:
+                with session.begin_nested():
+                    existing = DocumentSectionModel(
+                        session_id=session_id,
+                        section=section,
+                        text=text_content,
+                        updated_at=now_str,
+                    )
+                    session.add(existing)
+                    session.flush()
+            except IntegrityError:
+                logger.warning(
+                    "Colisao concorrente detectada ao inserir secao '%s' na sessao '%s'; aplicando update.",
+                    section,
+                    session_id,
+                )
+                existing = session.scalar(
+                    select(DocumentSectionModel).where(
+                        DocumentSectionModel.session_id == session_id,
+                        DocumentSectionModel.section == section,
+                    )
+                )
+                assert existing is not None
+                existing.text = text_content
+                existing.updated_at = now_str
+                session.flush()
         else:
             existing.text = text_content
             existing.updated_at = now_str
+            session.flush()
 
-        session.flush()
         return {
             "section": existing.section,
             "text": existing.text,
