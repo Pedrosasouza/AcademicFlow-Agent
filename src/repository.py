@@ -29,6 +29,7 @@ from src.models import (
     DecisionModel,
     DocumentSectionModel,
     RegulationChunkModel,
+    SessionModel,
     TaskModel,
     TaskStatus,
     UserModel,
@@ -41,9 +42,29 @@ _LEGACY_USER_PREFIX_RE = re.compile(r"^\[user:([^\]]+)\]\s*(.*)$", re.DOTALL)
 _ISO_DATE_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}")
 
 
-def _now() -> str:
-    """Retorna timestamp UTC compacto no formato esperado pelas ferramentas do agente."""
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+def _now_dt() -> datetime:
+    """Retorna objeto datetime com fuso horario UTC."""
+    return datetime.now(timezone.utc)
+
+
+def _format_timestamp(value: datetime | str) -> str:
+    """Formata um datetime em string compacta YYYY-MM-DD HH:MM."""
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%d %H:%M")
+    return str(value)
+
+
+def _ensure_session_exists(session: Session, session_id: str) -> str:
+    """Garante que a sala/evento exista na tabela sessions antes de vincular chaves estrangeiras."""
+    cleaned = (session_id or "").strip() or "default"
+    if session.get(SessionModel, cleaned) is None:
+        try:
+            with session.begin_nested():
+                session.add(SessionModel(id=cleaned))
+                session.flush()
+        except IntegrityError:
+            pass
+    return cleaned
 
 
 def _resolve_user(session: Session, raw_name: str | None) -> tuple[str, int | None]:
@@ -112,7 +133,7 @@ def _task_to_dict(task: TaskModel) -> dict[str, Any]:
         "owner_id": task.owner_id,
         "deadline": task.deadline,
         "status": task.status,
-        "created_at": task.created_at,
+        "created_at": _format_timestamp(task.created_at),
     }
 
 
@@ -122,7 +143,7 @@ def _decision_to_dict(item: DecisionModel) -> dict[str, Any]:
         "id": item.id,
         "decision": item.decision,
         "reason": item.reason,
-        "created_at": item.created_at,
+        "created_at": _format_timestamp(item.created_at),
     }
 
 
@@ -252,10 +273,18 @@ def list_users() -> list[str]:
         return list(names)
 
 
+def create_session(session_id: str) -> str:
+    """Registra uma sala/evento na tabela sessions de forma idempotente."""
+    with get_db_session() as session:
+        return _ensure_session_exists(session, session_id)
+
+
 def list_sessions() -> list[str]:
-    """Retorna a lista de identificadores de sessoes/eventos ativos no banco (incluindo 'default')."""
+    """Retorna a lista de identificadores de sessoes/eventos cadastrados no banco (incluindo 'default')."""
     with get_db_session() as session:
         found: set[str] = {"default"}
+        registered = session.scalars(select(SessionModel.id)).all()
+        found.update(s for s in registered if s)
         for model in (TaskModel, DecisionModel, DocumentSectionModel, ChatMessageModel):
             values = session.scalars(select(model.session_id).distinct()).all()
             found.update(v for v in values if v)
@@ -273,16 +302,17 @@ def create_task(
     """Cria uma nova tarefa no banco para a sessao informada e retorna seus dados como dicionario."""
     normalized_deadline = normalize_deadline(deadline)
     with get_db_session() as session:
+        clean_session = _ensure_session_exists(session, session_id)
         normalized_owner, owner_id = _resolve_user(session, owner)
 
         task = TaskModel(
-            session_id=session_id,
+            session_id=clean_session,
             title=title,
             owner=normalized_owner,
             owner_id=owner_id,
             deadline=normalized_deadline,
             status=TaskStatus.PENDING.value,
-            created_at=_now(),
+            created_at=_now_dt(),
         )
         session.add(task)
         session.flush()
@@ -336,11 +366,12 @@ def create_decision(
 ) -> dict[str, Any]:
     """Registra uma nova decisao do grupo na sessao e retorna um dicionario."""
     with get_db_session() as session:
+        clean_session = _ensure_session_exists(session, session_id)
         item = DecisionModel(
-            session_id=session_id,
+            session_id=clean_session,
             decision=decision,
             reason=reason or "",
-            created_at=_now(),
+            created_at=_now_dt(),
         )
         session.add(item)
         session.flush()
@@ -364,11 +395,12 @@ def upsert_document_section(
     session_id: str = "default",
 ) -> dict[str, Any]:
     """Cria ou atualiza uma secao do documento colaborativo tratando corridas de IntegrityError."""
-    now_str = _now()
+    now_dt = _now_dt()
     with get_db_session() as session:
+        clean_session = _ensure_session_exists(session, session_id)
         existing = session.scalar(
             select(DocumentSectionModel).where(
-                DocumentSectionModel.session_id == session_id,
+                DocumentSectionModel.session_id == clean_session,
                 DocumentSectionModel.section == section,
             )
         )
@@ -376,10 +408,10 @@ def upsert_document_section(
             try:
                 with session.begin_nested():
                     existing = DocumentSectionModel(
-                        session_id=session_id,
+                        session_id=clean_session,
                         section=section,
                         text=text_content,
-                        updated_at=now_str,
+                        updated_at=now_dt,
                     )
                     session.add(existing)
                     session.flush()
@@ -387,27 +419,27 @@ def upsert_document_section(
                 logger.warning(
                     "Colisao concorrente detectada ao inserir secao '%s' na sessao '%s'; aplicando update.",
                     section,
-                    session_id,
+                    clean_session,
                 )
                 existing = session.scalar(
                     select(DocumentSectionModel).where(
-                        DocumentSectionModel.session_id == session_id,
+                        DocumentSectionModel.session_id == clean_session,
                         DocumentSectionModel.section == section,
                     )
                 )
                 assert existing is not None
                 existing.text = text_content
-                existing.updated_at = now_str
+                existing.updated_at = now_dt
                 session.flush()
         else:
             existing.text = text_content
-            existing.updated_at = now_str
+            existing.updated_at = now_dt
             session.flush()
 
         return {
             "section": existing.section,
             "text": existing.text,
-            "updated_at": existing.updated_at,
+            "updated_at": _format_timestamp(existing.updated_at),
         }
 
 
@@ -422,7 +454,7 @@ def get_document_sections(session_id: str = "default") -> dict[str, dict[str, st
         return {
             row.section: {
                 "text": row.text,
-                "updated_at": row.updated_at,
+                "updated_at": _format_timestamp(row.updated_at),
             }
             for row in rows
         }
@@ -468,6 +500,7 @@ def append_messages(
         return
 
     with get_db_session() as session:
+        clean_session = _ensure_session_exists(session, session_id)
         for msg in messages:
             if isinstance(msg, HumanMessage):
                 raw_author, clean_content = _extract_author_and_clean_content(
@@ -482,7 +515,7 @@ def append_messages(
 
                 session.add(
                     ChatMessageModel(
-                        session_id=session_id,
+                        session_id=clean_session,
                         role="human",
                         author=author_name,
                         user_id=user_id,
@@ -496,7 +529,7 @@ def append_messages(
                 serialized_calls = list(raw_tool_calls) if raw_tool_calls else None
                 session.add(
                     ChatMessageModel(
-                        session_id=session_id,
+                        session_id=clean_session,
                         role="ai",
                         author=None,
                         user_id=None,
@@ -508,7 +541,7 @@ def append_messages(
             elif isinstance(msg, ToolMessage):
                 session.add(
                     ChatMessageModel(
-                        session_id=session_id,
+                        session_id=clean_session,
                         role="tool",
                         author=None,
                         user_id=None,
@@ -519,27 +552,39 @@ def append_messages(
                 )
 
 
-def load_messages(session_id: str = "default") -> list[BaseMessage]:
-    """Carrega o historico completo de mensagens de uma sessao convertido para classes do LangChain."""
+def load_messages(
+    session_id: str = "default",
+    after_id: int | None = None,
+) -> list[BaseMessage]:
+    """Carrega o historico de mensagens da sessao (completo ou incremental a partir de after_id)."""
     with get_db_session() as session:
-        rows = session.scalars(
-            select(ChatMessageModel)
-            .where(ChatMessageModel.session_id == session_id)
-            .order_by(ChatMessageModel.id)
-        ).all()
+        stmt = select(ChatMessageModel).where(ChatMessageModel.session_id == session_id)
+        if after_id is not None:
+            stmt = stmt.where(ChatMessageModel.id > after_id)
+        rows = session.scalars(stmt.order_by(ChatMessageModel.id)).all()
 
         history: list[BaseMessage] = []
         for row in rows:
+            meta = {"db_id": row.id}
             if row.role == "human":
                 if row.author:
-                    history.append(HumanMessage(content=row.content, name=row.author))
+                    history.append(
+                        HumanMessage(
+                            content=row.content,
+                            name=row.author,
+                            additional_kwargs=meta,
+                        )
+                    )
                 else:
-                    history.append(HumanMessage(content=row.content))
+                    history.append(
+                        HumanMessage(content=row.content, additional_kwargs=meta)
+                    )
             elif row.role == "ai":
                 history.append(
                     AIMessage(
                         content=row.content,
                         tool_calls=row.tool_calls or [],
+                        additional_kwargs=meta,
                     )
                 )
             elif row.role == "tool":
@@ -547,6 +592,7 @@ def load_messages(session_id: str = "default") -> list[BaseMessage]:
                     ToolMessage(
                         content=row.content,
                         tool_call_id=row.tool_call_id or "unknown_call",
+                        additional_kwargs=meta,
                     )
                 )
         return history

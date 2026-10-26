@@ -1,4 +1,4 @@
-"""Esquema relacional inicial versionado (usuarios, tarefas, decisoes, secoes, chat e editais RAG).
+"""Esquema relacional inicial versionado (sessoes, usuarios, tarefas, decisoes, secoes, chat e editais RAG).
 
 Revision ID: 0001_initial_schema
 Revises: None
@@ -21,11 +21,23 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    """Cria as 6 tabelas relacionais com indices, extensao pgvector e indice HNSW."""
+    """Cria as 7 tabelas relacionais com indices, FKs, extensao pgvector e indice HNSW."""
     bind = op.get_bind()
     is_postgres = bind.dialect.name == "postgresql"
     if is_postgres:
         op.execute(sa.text("CREATE EXTENSION IF NOT EXISTS vector"))
+
+    op.create_table(
+        "sessions",
+        sa.Column("id", sa.String(length=100), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.PrimaryKeyConstraint("id"),
+    )
 
     op.create_table(
         "users",
@@ -50,7 +62,13 @@ def upgrade() -> None:
         sa.Column("owner_id", sa.Integer(), nullable=True),
         sa.Column("deadline", sa.String(length=100), nullable=False),
         sa.Column("status", sa.String(length=50), nullable=False),
-        sa.Column("created_at", sa.String(length=20), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.ForeignKeyConstraint(["session_id"], ["sessions.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["owner_id"], ["users.id"], ondelete="SET NULL"),
         sa.PrimaryKeyConstraint("id"),
     )
@@ -63,7 +81,13 @@ def upgrade() -> None:
         sa.Column("session_id", sa.String(length=100), nullable=False, server_default="default"),
         sa.Column("decision", sa.Text(), nullable=False),
         sa.Column("reason", sa.Text(), nullable=False),
-        sa.Column("created_at", sa.String(length=20), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.ForeignKeyConstraint(["session_id"], ["sessions.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index(
@@ -76,7 +100,13 @@ def upgrade() -> None:
         sa.Column("session_id", sa.String(length=100), nullable=False, server_default="default"),
         sa.Column("section", sa.String(length=150), nullable=False),
         sa.Column("text", sa.Text(), nullable=False),
-        sa.Column("updated_at", sa.String(length=20), nullable=False),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.ForeignKeyConstraint(["session_id"], ["sessions.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("session_id", "section", name="uq_document_session_section"),
     )
@@ -109,6 +139,7 @@ def upgrade() -> None:
             server_default=sa.func.now(),
             nullable=False,
         ),
+        sa.ForeignKeyConstraint(["session_id"], ["sessions.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="SET NULL"),
         sa.PrimaryKeyConstraint("id"),
     )
@@ -180,3 +211,5 @@ def downgrade() -> None:
 
     op.drop_index(op.f("ix_users_name"), table_name="users")
     op.drop_table("users")
+
+    op.drop_table("sessions")

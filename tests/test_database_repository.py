@@ -612,6 +612,34 @@ def test_upsert_document_section_recovers_from_concurrent_integrity_error(monkey
     assert result["text"] == "Versao Atualizada Apos Corrida"
 
 
+def test_sessions_table_persists_empty_rooms_and_incremental_load_messages_after_id():
+    """Garante que create_session persiste salas vazias em sessions e load_messages suporta after_id."""
+    created = repository.create_session("workshop_quantum")
+    assert created == "workshop_quantum"
+    assert "workshop_quantum" in repository.list_sessions()
+
+    repository.append_messages(
+        [
+            HumanMessage(content="Mensagem 1", name="Alice"),
+            AIMessage(content="Resposta 1"),
+        ],
+        session_id="workshop_quantum",
+    )
+    first_batch = repository.load_messages(session_id="workshop_quantum")
+    assert len(first_batch) == 2
+    last_id = first_batch[-1].additional_kwargs["db_id"]
+
+    repository.append_messages(
+        [HumanMessage(content="Mensagem 2 incremental", name="Bob")],
+        session_id="workshop_quantum",
+    )
+    delta = repository.load_messages(session_id="workshop_quantum", after_id=last_id)
+    assert len(delta) == 1
+    assert delta[0].content == "Mensagem 2 incremental"
+    assert delta[0].name == "Bob"
+
+
+
 
 
 

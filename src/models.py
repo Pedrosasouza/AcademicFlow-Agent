@@ -4,7 +4,7 @@ Modelos ORM com SQLAlchemy 2.0 para persistencia relacional do AcademicFlow-Agen
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Any
 
@@ -24,6 +24,47 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator, TypeEngine, UserDefinedType
 
 EMBEDDING_DIM = 768
+
+
+class UTCDateTime(TypeDecorator[datetime]):
+    """Tipo DateTime(timezone=True) que aceita objetos datetime ou strings ISO-8601 no bind."""
+
+    impl = DateTime(timezone=True)
+    cache_ok = True
+
+    def process_bind_param(
+        self,
+        value: datetime | str | None,
+        dialect: Dialect,
+    ) -> datetime | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            parsed = datetime.fromisoformat(value.strip())
+            if parsed.tzinfo is None:
+                return parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc)
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+    def process_result_value(
+        self,
+        value: datetime | str | None,
+        dialect: Dialect,
+    ) -> datetime | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            parsed = datetime.fromisoformat(value)
+            return (
+                parsed.replace(tzinfo=timezone.utc)
+                if parsed.tzinfo is None
+                else parsed
+            )
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
 
 
 class _PgVectorCol(UserDefinedType[list[float]]):
@@ -93,6 +134,20 @@ class Base(DeclarativeBase):
     """Classe base declarativa do SQLAlchemy 2.0 para mapeamento das tabelas."""
 
 
+class SessionModel(Base):
+    """Salas/eventos colaborativos registrados no sistema."""
+
+    __tablename__ = "sessions"
+
+    id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(),
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+
 class UserModel(Base):
     """Participantes cadastrados na sessao colaborativa."""
 
@@ -101,7 +156,10 @@ class UserModel(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(100), unique=True, index=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
+        UTCDateTime(),
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        nullable=False,
     )
 
 
@@ -112,7 +170,11 @@ class TaskModel(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     session_id: Mapped[str] = mapped_column(
-        String(100), default="default", index=True, nullable=False
+        String(100),
+        ForeignKey("sessions.id", ondelete="CASCADE"),
+        default="default",
+        index=True,
+        nullable=False,
     )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     owner: Mapped[str] = mapped_column(String(100), default="a definir", nullable=False)
@@ -123,7 +185,12 @@ class TaskModel(Base):
     status: Mapped[str] = mapped_column(
         String(50), default=TaskStatus.PENDING.value, nullable=False
     )
-    created_at: Mapped[str] = mapped_column(String(20), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(),
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        nullable=False,
+    )
 
 
 class DecisionModel(Base):
@@ -133,11 +200,20 @@ class DecisionModel(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     session_id: Mapped[str] = mapped_column(
-        String(100), default="default", index=True, nullable=False
+        String(100),
+        ForeignKey("sessions.id", ondelete="CASCADE"),
+        default="default",
+        index=True,
+        nullable=False,
     )
     decision: Mapped[str] = mapped_column(Text, nullable=False)
     reason: Mapped[str] = mapped_column(Text, default="", nullable=False)
-    created_at: Mapped[str] = mapped_column(String(20), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(),
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        nullable=False,
+    )
 
 
 class DocumentSectionModel(Base):
@@ -150,11 +226,20 @@ class DocumentSectionModel(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     session_id: Mapped[str] = mapped_column(
-        String(100), default="default", index=True, nullable=False
+        String(100),
+        ForeignKey("sessions.id", ondelete="CASCADE"),
+        default="default",
+        index=True,
+        nullable=False,
     )
     section: Mapped[str] = mapped_column(String(150), index=True, nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
-    updated_at: Mapped[str] = mapped_column(String(20), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(),
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        nullable=False,
+    )
 
 
 class ChatMessageModel(Base):
@@ -164,7 +249,11 @@ class ChatMessageModel(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     session_id: Mapped[str] = mapped_column(
-        String(100), default="default", index=True, nullable=False
+        String(100),
+        ForeignKey("sessions.id", ondelete="CASCADE"),
+        default="default",
+        index=True,
+        nullable=False,
     )
     role: Mapped[str] = mapped_column(String(20), nullable=False)
     author: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -175,7 +264,10 @@ class ChatMessageModel(Base):
     tool_calls: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
     tool_call_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
+        UTCDateTime(),
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        nullable=False,
     )
 
 
@@ -200,5 +292,8 @@ class RegulationChunkModel(Base):
         PgVectorType(EMBEDDING_DIM), nullable=False
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
+        UTCDateTime(),
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        nullable=False,
     )

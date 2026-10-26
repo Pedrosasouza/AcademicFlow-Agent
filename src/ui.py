@@ -65,6 +65,8 @@ def _reset_session(session_id: str | None = None) -> None:
     repository.clear_project_board(session_id=target_session)
     if "messages" in st.session_state:
         st.session_state.messages = []
+    if "loaded_session" in st.session_state:
+        st.session_state.loaded_session = None
     if "tools_called" in st.session_state:
         st.session_state.tools_called = set()
     if "project_board" in st.session_state:
@@ -107,6 +109,7 @@ def _render_event_chooser() -> str:
             if st.button("Criar / Acessar sala"):
                 cleaned = new_event.strip()
                 if cleaned:
+                    repository.create_session(cleaned)
                     st.session_state.custom_sessions.add(cleaned)
                     st.session_state.current_session = cleaned
                     react_agent.set_active_session(cleaned)
@@ -217,9 +220,27 @@ def _sync_session_state_from_db(
     usuarios: list[str],
     session_id: str = "default",
 ) -> None:
-    """Sincroniza o session_state do Streamlit com os dados da sala/evento no banco relacional."""
+    """Sincroniza o session_state do Streamlit de forma incremental (after_id) com o banco relacional."""
     react_agent.set_active_session(session_id)
-    messages = repository.load_messages(session_id=session_id)
+    existing_msgs: list[BaseMessage] = (
+        list(st.session_state.messages)
+        if st.session_state.get("loaded_session") == session_id
+        and "messages" in st.session_state
+        else []
+    )
+    last_id = (
+        existing_msgs[-1].additional_kwargs.get("db_id")
+        if existing_msgs
+        else None
+    )
+
+    if isinstance(last_id, int):
+        new_msgs = repository.load_messages(session_id=session_id, after_id=last_id)
+        messages = [*existing_msgs, *new_msgs]
+    else:
+        messages = repository.load_messages(session_id=session_id)
+
+    st.session_state.loaded_session = session_id
     st.session_state.messages = messages
     st.session_state.project_board = repository.get_project_board(session_id=session_id)
     st.session_state.tools_called = _extract_tools_called(messages)

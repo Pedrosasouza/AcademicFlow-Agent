@@ -275,7 +275,25 @@ def build_llm(
     ).bind_tools(tools)
 
 
-llm = build_llm()
+class _LazyLLM:
+    """Proxy que adia a instanciacao do ChatOllama ate a primeira invocacao real."""
+
+    def __init__(self) -> None:
+        self._instance: Any = None
+
+    def _get(self) -> Any:
+        if self._instance is None:
+            self._instance = build_llm()
+        return self._instance
+
+    def invoke(self, *args: Any, **kwargs: Any) -> Any:
+        return self._get().invoke(*args, **kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._get(), name)
+
+
+llm = _LazyLLM()
 
 
 def _format_messages_for_llm(messages: list[BaseMessage]) -> list[BaseMessage]:
@@ -311,7 +329,28 @@ def build_agent(custom_llm: Any = None) -> Any:
     return workflow.compile()
 
 
-react_event_agent = build_agent()
+class _LazyAgent:
+    """Proxy que adia a compilacao do grafo padrao ate o primeiro invoke/stream."""
+
+    def __init__(self) -> None:
+        self._compiled: Any = None
+
+    def _get(self) -> Any:
+        if self._compiled is None:
+            self._compiled = build_agent()
+        return self._compiled
+
+    def invoke(self, *args: Any, **kwargs: Any) -> Any:
+        return self._get().invoke(*args, **kwargs)
+
+    def stream(self, *args: Any, **kwargs: Any) -> Any:
+        return self._get().stream(*args, **kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._get(), name)
+
+
+react_event_agent = _LazyAgent()
 
 
 # =============================================================================

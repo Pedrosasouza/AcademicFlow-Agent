@@ -25,7 +25,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from src.models import EMBEDDING_DIM, RegulationChunkModel, UserModel
+from src.models import EMBEDDING_DIM, RegulationChunkModel, SessionModel, UserModel
 
 load_dotenv()
 
@@ -290,8 +290,11 @@ def run_migrations(revision: str = "head") -> None:
 
 
 def _seed_initial_data() -> None:
-    """Popula de forma idempotente os participantes e normas institucionais iniciais."""
+    """Popula de forma idempotente a sessao padrao, os participantes e as normas institucionais iniciais."""
     with get_db_session() as session:
+        if session.get(SessionModel, "default") is None:
+            session.add(SessionModel(id="default"))
+
         existing_names = set(session.scalars(select(UserModel.name)).all())
         for name in DEFAULT_USERS:
             if name not in existing_names:
