@@ -67,7 +67,7 @@ O esquema é gerenciado por migrações versionadas do **Alembic** (`run_migrati
 - `decisions`: Decisões tomadas e justificativas por sala (`id`, `session_id` FK para `sessions.id`, `decision`, `reason`, `created_at` em `DateTime(timezone=True)`).
 - `document_sections`: Seções do plano com unicidade composta `(session_id, section)` (`id`, `session_id` FK para `sessions.id`, `section`, `text`, `updated_at` em `DateTime(timezone=True)`).
 - `chat_messages`: Histórico de mensagens (`id`, `session_id` FK para `sessions.id`, `role`, `author`, `user_id` FK para `users.id`, `content`, `tool_calls` em JSON, `tool_call_id`, `created_at` em `DateTime(timezone=True)`).
-- `regulation_chunks`: Base vetorial de editais e normas institucionais (`id`, `source`, `title`, `content`, `embedding`, `created_at`) com coluna nativa `vector(768)` e índice **HNSW** (`vector_cosine_ops`) no PostgreSQL (`pgvector`), gerando embeddings via `OllamaEmbeddings`.
+- `regulation_chunks`: Base vetorial de editais e normas institucionais (`id`, `source`, `title`, `content`, `embedding`, `created_at`) com coluna nativa `vector(768)` e índice **HNSW** (`vector_cosine_ops`) no PostgreSQL (`pgvector`), gerando embeddings via `OllamaEmbeddings` (com fallback determinístico de n-gramas quando offline/CI).
 
 ---
 
@@ -80,7 +80,7 @@ O esquema é gerenciado por migrações versionadas do **Alembic** (`run_migrati
 | ✅ Registro de decisões | `register_decision` | Persiste decisões importantes tomadas pelo grupo e suas justificativas |
 | 📄 Documento colaborativo | `update_document_section` | Cria ou atualiza (*upsert*) seções estruturadas do plano do evento |
 | 📊 Quadro do projeto | `consult_project_board` | Consulta e sintetiza o estado atual de tarefas, decisões e documentos no banco |
-| 📚 Busca em editais (RAG) | `search_event_regulations` | Busca semântica (`pgvector` `<=>` / similaridade de cosseno) em normas e editais da universidade |
+| 📚 Busca em editais (RAG) | `search_event_regulations` | Busca semântica em normas da universidade via `pgvector` (`<=>` + índice HNSW no PostgreSQL) ou similaridade de cosseno em memória nos testes SQLite |
 
 ---
 
@@ -107,10 +107,11 @@ AcademicFlow-Agent/
 │   └── ui.py                          # Interface web colaborativa em Streamlit
 ├── tests/
 │   ├── conftest.py                    # Fixtures de isolamento (SQLite in-memory / TEST_DATABASE_URL)
-│   ├── test_agent_configuration.py    # Testes de configuração e fluxo do grafo ReAct
+│   ├── test_agent_configuration.py    # Testes de configuração, CLI e fluxo do grafo ReAct
 │   ├── test_collaboration_tools.py    # Testes de integração das ferramentas com o banco
-│   ├── test_database_repository.py    # Testes unitários de modelos, transações, CRUD e UI helpers
-│   └── test_docker_configuration.py   # Testes de infraestrutura containerizada (Dockerfile e Compose)
+│   ├── test_database_repository.py    # Testes unitários de modelos, transações, CRUD e RAG
+│   ├── test_docker_configuration.py   # Testes de infraestrutura containerizada (Dockerfile e Compose)
+│   └── test_ui.py                     # Testes da interface Streamlit e tratamento de falhas
 ├── .dockerignore                      # Exclusão de segredos (.env) e caches no contexto de build
 ├── .env.example                       # Exemplo de variáveis de ambiente
 ├── alembic.ini                        # Configuração de migrações de banco de dados (Alembic)
@@ -211,7 +212,9 @@ Os roteiros de testes manuais e de aceitação estão documentados em [`docs/TES
 ## ⚖️ Decisões Arquiteturais e Limitações Conhecidas
 
 - **Simulação Multiusuário sem Autenticação:** O seletor de participante na barra lateral do Streamlit (`Alice`, `Bob`, `Charlie`) destina-se à demonstração acadêmica de fluxos colaborativos em grupo na disciplina *SSC0528 - Sistemas Colaborativos*. Não há camada de autenticação por senha/OAuth/JWT; a autoria selecionada é vinculada via chave estrangeira (`users.id`) nas tabelas `tasks` e `chat_messages`.
-- **Dimensionalidade Fixa no `pgvector` (768d):** A coluna `regulation_chunks.embedding` é tipada nativamente como `vector(768)` com índice **HNSW** (`vector_cosine_ops`), alinhada ao modelo padrão `nomic-embed-text` (768 dimensões). Caso `OLLAMA_EMBEDDING_MODEL` seja alterado, o modelo escolhido deve produzir vetores de 768 dimensões. Em ambientes de teste/CI sem Ollama ativo, o sistema utiliza automaticamente um fallback determinístico de n-gramas de 768 dimensões.
+- **Arquitetura de RAG e Fallbacks de Teste (Geração de Embeddings vs. Busca Vetorial):** O módulo de consulta a editais (`regulation_chunks`) opera em dois níveis independentes para garantir performance em produção e zero dependência externa nos testes:
+  1. *Geração do vetor (`compute_embedding`, 768d):* Em produção (`EMBEDDING_PROVIDER=ollama`), utiliza embeddings densos via `OllamaEmbeddings` (`nomic-embed-text`). Caso `OLLAMA_EMBEDDING_MODEL` seja alterado, o modelo deve produzir exatamente 768 dimensões. Apenas quando o Ollama está offline ou durante testes automatizados (`EMBEDDING_PROVIDER=trigram`), o sistema recorre ao fallback determinístico de projeção de n-gramas (`compute_trigram_embedding`).
+  2. *Execução da busca (`search_regulation_chunks`):* No PostgreSQL com a extensão `pgvector` ativa, a busca ocorre diretamente no banco via operador `<=>` (distância de cosseno) acelerado pelo índice **HNSW** (`ix_regulation_chunks_embedding_hnsw`). O cálculo de similaridade de cosseno em memória (`_cosine_similarity` com *full scan*) é utilizado exclusivamente como fallback para testes em `sqlite:///:memory:` (que não possui a extensão `pgvector`).
 - **Migrações Versionadas (Alembic):** Toda criação e evolução de schema ocorre via `run_migrations("head")` (`migrations/versions/`). Caso um banco legado sem tabela `alembic_version` seja detectado, o sistema aplica `alembic stamp` preservando os dados existentes.
 
 ---

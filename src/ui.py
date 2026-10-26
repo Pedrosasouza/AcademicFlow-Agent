@@ -1,3 +1,11 @@
+"""
+Interface web colaborativa em Streamlit para o AcademicFlow-Agent.
+
+Conecta o fluxo multiusuario (salas/eventos, participantes, quadro de tarefas,
+decisoes, secoes do documento e base vetorial de editais RAG) ao banco de dados
+relacional via Repository Pattern e ao grafo ReAct em src/agent.py.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -133,7 +141,11 @@ def _render_regulations_panel() -> None:
     """Renderiza na barra lateral a base vetorial de editais e permite indexar novas normas."""
     with st.sidebar:
         with st.expander("📚 Editais e Normas (RAG pgvector)", expanded=False):
-            chunks = repository.list_regulation_chunks()
+            if "regulation_chunks_cache" not in st.session_state:
+                st.session_state.regulation_chunks_cache = (
+                    repository.list_regulation_chunks()
+                )
+            chunks = st.session_state.regulation_chunks_cache
             st.caption(f"{len(chunks)} normas indexadas na base vetorial.")
             for item in chunks:
                 st.markdown(f"**{item['title']}** *({item['source']})*  \n{item['content']}")
@@ -147,6 +159,9 @@ def _render_regulations_panel() -> None:
                         source=source.strip() or "Edital Institucional",
                         title=title.strip(),
                         content=content.strip(),
+                    )
+                    st.session_state.regulation_chunks_cache = (
+                        repository.list_regulation_chunks()
                     )
                     st.rerun()
 

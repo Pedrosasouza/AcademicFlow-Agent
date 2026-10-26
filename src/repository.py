@@ -10,6 +10,7 @@ import logging
 import math
 import re
 from typing import Any
+import unicodedata
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from sqlalchemy import delete, func, select, text
@@ -82,12 +83,18 @@ def _resolve_user(session: Session, raw_name: str | None) -> tuple[str, int | No
 
 
 def validate_task_status(status: str | TaskStatus) -> str:
-    """Valida se o status informado pertence ao enum TaskStatus."""
+    """Valida se o status informado pertence ao enum TaskStatus (normalizando acentos comuns do LLM)."""
     if isinstance(status, TaskStatus):
         return status.value
-    cleaned = (status or "").strip().lower()
+    raw_cleaned = (status or "").strip().lower()
+    ascii_cleaned = (
+        unicodedata.normalize("NFKD", raw_cleaned)
+        .encode("ascii", "ignore")
+        .decode("ascii")
+        .replace(" ", "_")
+    )
     try:
-        return TaskStatus(cleaned).value
+        return TaskStatus(ascii_cleaned).value
     except ValueError as exc:
         valid_values = ", ".join(s.value for s in TaskStatus)
         raise ValueError(
@@ -195,11 +202,15 @@ def index_regulation_chunk(
 
 
 def list_regulation_chunks() -> list[dict[str, Any]]:
-    """Lista todos os trechos de editais e regulamentos cadastrados na base vetorial."""
+    """Lista os metadados e textos dos editais cadastrados sem trafegar a coluna de embedding."""
     with get_db_session() as session:
-        rows = session.scalars(
-            select(RegulationChunkModel).order_by(RegulationChunkModel.id)
-        ).all()
+        stmt = select(
+            RegulationChunkModel.id,
+            RegulationChunkModel.source,
+            RegulationChunkModel.title,
+            RegulationChunkModel.content,
+        ).order_by(RegulationChunkModel.id)
+        rows = session.execute(stmt).all()
         return [
             {
                 "id": row.id,
@@ -216,7 +227,12 @@ def search_regulation_chunks(
     query_embedding: Sequence[float] | None = None,
     top_k: int = 3,
 ) -> list[dict[str, Any]]:
-    """Busca os trechos mais relevantes usando a coluna nativa vector(N) com indice HNSW no pgvector ou cosseno em memoria."""
+    """Busca os trechos mais relevantes usando pgvector (<=> com HNSW) em producao.
+
+    Nota arquitetural: Quando executado em SQLite (testes unitarios/CI) ou sem a
+    extensao pgvector ativa, utiliza um fallback de similaridade de cosseno em
+    memoria (full scan), dimensionado exclusivamente para bases pequenas de teste.
+    """
     vec = (
         fit_embedding_dimensions(query_embedding)
         if query_embedding is not None
@@ -251,6 +267,7 @@ def search_regulation_chunks(
                 for row in rows
             ]
 
+        # Fallback em memoria exclusivo para testes/CI (SQLite) ou Postgres sem pgvector
         candidates = session.scalars(select(RegulationChunkModel)).all()
         scored = [
             {
@@ -326,9 +343,19 @@ def update_task_by_id(
     deadline: str | datetime | date | None = None,
     session_id: str = "default",
 ) -> dict[str, Any] | None:
-    """Atualiza campos de uma tarefa existente na sessao pelo ID ou retorna None se nao encontrada."""
-    validated_status = validate_task_status(status) if status else None
-    normalized_deadline = normalize_deadline(deadline) if deadline else None
+    """Atualiza campos de uma tarefa existente na sessao pelo ID ou retorna None se nao encontrada.
+
+    Argumentos omitidos (None) ou strings vazias/em branco sao ignorados para preservar
+    os valores atuais quando o LLM preenche apenas os campos que deseja alterar.
+    """
+    cleaned_status = status.strip() if isinstance(status, str) else status
+    cleaned_owner = (owner or "").strip()
+    cleaned_deadline = deadline.strip() if isinstance(deadline, str) else deadline
+
+    validated_status = validate_task_status(cleaned_status) if cleaned_status else None
+    normalized_deadline = (
+        normalize_deadline(cleaned_deadline) if cleaned_deadline else None
+    )
 
     with get_db_session() as session:
         task = session.get(TaskModel, task_id)
@@ -337,8 +364,8 @@ def update_task_by_id(
 
         if validated_status:
             task.status = validated_status
-        if owner:
-            normalized_owner, owner_id = _resolve_user(session, owner)
+        if cleaned_owner:
+            normalized_owner, owner_id = _resolve_user(session, cleaned_owner)
             task.owner = normalized_owner
             task.owner_id = owner_id
         if normalized_deadline:
@@ -490,6 +517,31 @@ def _extract_author_and_clean_content(
     return (cleaned_author or None), raw_content
 
 
+def _normalize_tool_calls(
+    raw_tool_calls: Sequence[dict[str, Any]] | None,
+    fallback_prefix: str = "unknown_call",
+) -> list[dict[str, Any]]:
+    """Garante que todo item de tool_calls possua id, name, args e type validos para o LangChain."""
+    if not raw_tool_calls:
+        return []
+    normalized: list[dict[str, Any]] = []
+    for idx, tc in enumerate(raw_tool_calls):
+        if not isinstance(tc, dict):
+            continue
+        call_id = str(tc.get("id") or "").strip() or (
+            fallback_prefix if idx == 0 else f"{fallback_prefix}_{idx}"
+        )
+        normalized.append(
+            {
+                "name": str(tc.get("name") or "unknown_tool"),
+                "args": tc.get("args") if isinstance(tc.get("args"), dict) else {},
+                "id": call_id,
+                "type": str(tc.get("type") or "tool_call"),
+            }
+        )
+    return normalized
+
+
 def append_messages(
     messages: Sequence[BaseMessage],
     session_id: str = "default",
@@ -526,7 +578,8 @@ def append_messages(
                 )
             elif isinstance(msg, AIMessage):
                 raw_tool_calls = getattr(msg, "tool_calls", None)
-                serialized_calls = list(raw_tool_calls) if raw_tool_calls else None
+                normalized_calls = _normalize_tool_calls(raw_tool_calls)
+                serialized_calls = normalized_calls if normalized_calls else None
                 session.add(
                     ChatMessageModel(
                         session_id=clean_session,
@@ -539,6 +592,7 @@ def append_messages(
                     )
                 )
             elif isinstance(msg, ToolMessage):
+                raw_call_id = str(getattr(msg, "tool_call_id", "") or "").strip()
                 session.add(
                     ChatMessageModel(
                         session_id=clean_session,
@@ -547,7 +601,7 @@ def append_messages(
                         user_id=None,
                         content=str(msg.content),
                         tool_calls=None,
-                        tool_call_id=getattr(msg, "tool_call_id", None),
+                        tool_call_id=raw_call_id or "unknown_call",
                     )
                 )
 
@@ -583,15 +637,16 @@ def load_messages(
                 history.append(
                     AIMessage(
                         content=row.content,
-                        tool_calls=row.tool_calls or [],
+                        tool_calls=_normalize_tool_calls(row.tool_calls),
                         additional_kwargs=meta,
                     )
                 )
             elif row.role == "tool":
+                clean_call_id = (row.tool_call_id or "").strip() or "unknown_call"
                 history.append(
                     ToolMessage(
                         content=row.content,
-                        tool_call_id=row.tool_call_id or "unknown_call",
+                        tool_call_id=clean_call_id,
                         additional_kwargs=meta,
                     )
                 )
@@ -633,12 +688,17 @@ def clear_project_board(session_id: str | None = None) -> None:
         elif engine.dialect.name == "postgresql":
             session.execute(
                 text(
-                    "TRUNCATE TABLE tasks, decisions, document_sections, chat_messages "
+                    "TRUNCATE TABLE tasks, decisions, document_sections, chat_messages, sessions "
                     "RESTART IDENTITY CASCADE"
                 )
             )
+            _ensure_session_exists(session, "default")
         else:
             session.execute(delete(TaskModel))
             session.execute(delete(DecisionModel))
             session.execute(delete(DocumentSectionModel))
             session.execute(delete(ChatMessageModel))
+            session.execute(
+                delete(SessionModel).where(SessionModel.id != "default")
+            )
+            _ensure_session_exists(session, "default")

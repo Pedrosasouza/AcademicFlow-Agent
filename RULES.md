@@ -35,7 +35,7 @@ Este é um projeto de portfólio para candidaturas a estágio em Engenharia de I
 - **Linguagem & Tipagem**: Python 3.10+, com type hints estritos nas funções novas e modelos ORM.
 - **Nomenclatura**: Nomes de variáveis, funções, classes e módulos em inglês (`UserModel`, `TaskRepository`, `get_project_board`), sem abreviações obscuras. Comentários e docstrings explicativos em português.
 - **Qualidade**: Código limpo, sem código morto e sem comentários redundantes.
-- **Configurações**: Todas as configurações via variáveis de ambiente (`DATABASE_URL`, `OLLAMA_MODEL`, `OLLAMA_BASE_URL`) carregadas com `python-dotenv`. Nada de credencial ou URL fixa no código.
+- **Configurações**: Todas as configurações via variáveis de ambiente (`DATABASE_URL`, `OLLAMA_MODEL`, `OLLAMA_EMBEDDING_MODEL`, `OLLAMA_BASE_URL`) carregadas com `python-dotenv`. Nada de credencial ou URL fixa no código.
 - **Segurança**: Nunca commitar segredos ou arquivos `.env`. Manter `.env.example` atualizado com exemplos e checar `.gitignore`.
 - **Tratamento de erros**: Tratar explicitamente exceções de conexão com o banco (`OperationalError`), falhas do Ollama e dados inválidos, exibindo mensagens claras e acionáveis.
 
@@ -46,12 +46,14 @@ Este é um projeto de portfólio para candidaturas a estágio em Engenharia de I
 - **Padrão Repository**: Acesso a dados centralizado exclusivamente em `src/repository.py`. Nem o agente (`agent.py`) nem a interface (`ui.py`) devem conter queries SQL diretas ou sessões ORM dispersas.
 - **Modelagem ORM**: Uso estrito da sintaxe moderna do SQLAlchemy 2.0 (`DeclarativeBase`, `Mapped[...]`, `mapped_column(...)`).
 - **Entidades mapeadas**:
+  - `SessionModel`: Salas/eventos colaborativos registrados (isolamento multi-tenant por `session_id`).
   - `UserModel`: Participantes do projeto (seed automático: Alice, Bob, Charlie).
-  - `TaskModel`: Tarefas com título, responsável, prazo e status.
+  - `TaskModel`: Tarefas com título, responsável (`owner` e FK `owner_id`), prazo e status (`TaskStatus`).
   - `DecisionModel`: Decisões registradas e justificativas.
-  - `DocumentSectionModel`: Seções estruturadas do documento de planejamento.
-  - `ChatMessageModel`: Histórico de mensagens do chat (papel, conteúdo, metadados de tool calls).
-- **Reprodutibilidade**: Esquema criado programaticamente via `init_db()` (`Base.metadata.create_all`) de forma idempotente.
+  - `DocumentSectionModel`: Seções estruturadas do documento de planejamento com unicidade composta `(session_id, section)`.
+  - `ChatMessageModel`: Histórico de mensagens do chat (papel, autoria, FK `user_id`, conteúdo, metadados de tool calls).
+  - `RegulationChunkModel`: Base vetorial de editais e normas institucionais (`vector(768)` com índice HNSW no PostgreSQL/`pgvector`).
+- **Reprodutibilidade**: Esquema versionado e aplicado via migrações do Alembic (`run_migrations("head")` dentro de `init_db()`) de forma idempotente.
 - **Segurança**: Consultas parametrizadas garantidas via ORM/SQLAlchemy Core, sem concatenação de strings em SQL.
 - **Isolamento**: Testes rodam em banco SQLite em memória isolado; nunca dependem de um banco populado nem afetam dados reais.
 
@@ -72,7 +74,7 @@ Conventional Commits, em português: `tipo(escopo): resumo no imperativo`.
 
 - **Tipos**: `feat`, `fix`, `docs`, `test`, `refactor`, `chore`.
 - **Formato do título**: Até 70 caracteres, sem ponto final, sem emoji, sem marketing.
-- **Escopo atômico**: Um commit por fase ou mudança lógica (ex.: `feat(db)`, `refactor(agent)`, `test(db)`).
+- **Escopo atômico**: Um commit por fase ou mudança lógica (ex.: `feat(infra)`, `feat(db)`, `refactor(agent)`, `test(db)`).
 - **Corpo do commit**: Justifique as decisões arquiteturais (ex.: escolha de SQLAlchemy 2.0 e psycopg3 para compatibilidade e tipagem).
 - **Sem push direto**: **Nunca faça push.** Apresente o `git log` para revisão prévia.
 

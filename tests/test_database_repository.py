@@ -639,6 +639,64 @@ def test_sessions_table_persists_empty_rooms_and_incremental_load_messages_after
     assert delta[0].name == "Bob"
 
 
+def test_update_task_ignores_blank_strings_and_normalizes_accented_status():
+    """Garante que strings em branco nao sobrescrevem campos existentes e status com acento e aceito."""
+    created = repository.create_task(
+        title="Preparar crachas",
+        owner="Alice",
+        deadline="2026-11-10",
+    )
+    updated = repository.update_task_by_id(
+        task_id=created["id"],
+        status="Concluída",
+        owner="   ",
+        deadline="",
+    )
+    assert updated is not None
+    assert updated["status"] == "concluida"
+    assert updated["owner"] == "Alice"
+    assert updated["deadline"] == "2026-11-10"
+
+
+def test_load_messages_normalizes_legacy_tool_calls_missing_id():
+    """Garante que mensagens salvas no banco sem id em tool_calls recebem fallback consistente."""
+    with database.get_db_session() as session:
+        session.add(
+            models.ChatMessageModel(
+                session_id="default",
+                role="ai",
+                content="",
+                tool_calls=[{"name": "consult_project_board", "args": {}}],
+                tool_call_id=None,
+            )
+        )
+        session.add(
+            models.ChatMessageModel(
+                session_id="default",
+                role="tool",
+                content="Quadro vazio",
+                tool_calls=None,
+                tool_call_id=None,
+            )
+        )
+
+    loaded = repository.load_messages(session_id="default")
+    assert len(loaded) == 2
+    assert isinstance(loaded[0], AIMessage)
+    assert loaded[0].tool_calls[0]["id"] == "unknown_call"
+    assert isinstance(loaded[1], ToolMessage)
+    assert loaded[1].tool_call_id == "unknown_call"
+
+
+def test_clear_project_board_none_removes_custom_sessions():
+    """Garante que clear_project_board(None) remove salas customizadas da tabela sessions."""
+    repository.create_session("sala_temporaria")
+    assert "sala_temporaria" in repository.list_sessions()
+
+    repository.clear_project_board(None)
+    assert repository.list_sessions() == ["default"]
+
+
 
 
 

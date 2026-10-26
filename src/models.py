@@ -4,6 +4,7 @@ Modelos ORM com SQLAlchemy 2.0 para persistencia relacional do AcademicFlow-Agen
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Any
@@ -24,6 +25,11 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator, TypeEngine, UserDefinedType
 
 EMBEDDING_DIM = 768
+
+
+def format_vector_literal(embedding: Sequence[float]) -> str:
+    """Formata uma sequencia de floats na sintaxe literal '[v1,v2,...]' com 6 casas decimais para o pgvector."""
+    return "[" + ",".join(f"{float(x):.6f}" for x in embedding) + "]"
 
 
 class UTCDateTime(TypeDecorator[datetime]):
@@ -101,10 +107,9 @@ class PgVectorType(TypeDecorator[list[float]]):
     ) -> Any:
         if value is None:
             return None
-        vec = [float(x) for x in value]
         if dialect.name == "postgresql":
-            return "[" + ",".join(f"{x:.6f}" for x in vec) + "]"
-        return vec
+            return format_vector_literal(value)
+        return [round(float(x), 6) for x in value]
 
     def process_result_value(
         self,

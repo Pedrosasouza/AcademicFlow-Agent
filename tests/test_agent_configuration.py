@@ -1,6 +1,8 @@
 from unittest.mock import MagicMock, patch
 
+from httpx import ConnectError
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from sqlalchemy.exc import OperationalError
 
 from src import agent, repository
 
@@ -122,3 +124,95 @@ def test_run_turn_and_build_agent_persist_clean_author_without_user_prefix():
     assert isinstance(saved_history[0], HumanMessage)
     assert saved_history[0].content == "Vamos definir o cronograma."
     assert saved_history[0].name == "Alice"
+
+
+def test_run_turn_invokes_print_step_callback_for_tool_call_and_final_answer(capsys):
+    """Garante que print_step exibe no terminal a chamada da ferramenta, o resultado e a resposta final."""
+    tool_call_msg = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": "register_decision",
+                "args": {"decision": "Evento gratuito", "reason": "Inclusao"},
+                "id": "call_dec_1",
+                "type": "tool_call",
+            }
+        ],
+    )
+    final_msg = AIMessage(content="Decisao registrada com sucesso.")
+
+    custom_llm = MagicMock()
+    custom_llm.invoke.side_effect = [tool_call_msg, final_msg]
+    isolated_graph = agent.build_agent(custom_llm=custom_llm)
+
+    agent.run_turn(
+        user_input="Registre a decisao de evento gratuito.",
+        session_id="default",
+        author="Bob",
+        on_step=agent.print_step,
+        compiled_agent=isolated_graph,
+    )
+
+    output = capsys.readouterr().out
+    assert "[chamando ferramenta: register_decision]" in output
+    assert "[resultado da ferramenta: Decisao #1 registrada: Evento gratuito. Motivo: Inclusao]" in output
+    assert "Agente: Decisao registrada com sucesso." in output
+
+
+def test_cli_main_executes_interactive_turn_and_exits_cleanly(monkeypatch, capsys):
+    """Valida o loop interativo main() da CLI processando um turno real e encerrando com 'exit'."""
+    inputs = iter(["Ola equipe", "exit"])
+    monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+
+    with patch.object(agent, "llm") as mock_llm:
+        mock_llm.invoke.return_value = AIMessage(content="Ola! Pronto para ajudar.")
+        agent.main()
+
+    output = capsys.readouterr().out
+    assert "=== React Agent Colaborativo: Planejamento de Evento ===" in output
+    assert "Agente: Ola! Pronto para ajudar." in output
+    assert len(repository.load_messages(session_id="default")) == 2
+
+
+def test_cli_main_handles_database_and_ollama_errors_gracefully(monkeypatch, capsys):
+    """Garante que main() exibe mensagens claras quando o PostgreSQL ou o Ollama falham."""
+    # 1. Falha de banco logo no init_db()
+    with patch.object(
+        agent,
+        "init_db",
+        side_effect=OperationalError("SELECT 1", {}, Exception("DB down")),
+    ):
+        agent.main()
+
+    out_db_init = capsys.readouterr().out
+    assert "Nao consegui conectar ao banco de dados PostgreSQL." in out_db_init
+
+    # 2. Falha de conexao com Ollama durante run_turn()
+    monkeypatch.setattr("builtins.input", lambda _: "Pergunta ao agente")
+    with patch.object(
+        agent,
+        "run_turn",
+        side_effect=ConnectError("Ollama offline"),
+    ):
+        agent.main()
+
+    out_ollama = capsys.readouterr().out
+    assert "Nao consegui conectar ao Ollama." in out_ollama
+
+    # 3. Queda do banco durante run_turn()
+    with patch.object(
+        agent,
+        "run_turn",
+        side_effect=OperationalError("INSERT", {}, Exception("DB lost")),
+    ):
+        agent.main()
+
+    out_db_turn = capsys.readouterr().out
+    assert "Erro de conexao com o banco de dados durante a execucao." in out_db_turn
+
+
+def test_search_event_regulations_returns_message_when_no_matches_found(monkeypatch):
+    """Garante que search_event_regulations informa claramente quando nenhuma norma e encontrada."""
+    monkeypatch.setattr(repository, "search_regulation_chunks", lambda query, top_k=3: [])
+    result = agent.search_event_regulations.invoke({"query": "assunto inexistente"})
+    assert result == "Nenhuma norma ou edital encontrado para a consulta."

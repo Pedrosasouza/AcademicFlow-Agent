@@ -25,7 +25,13 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from src.models import EMBEDDING_DIM, RegulationChunkModel, SessionModel, UserModel
+from src.models import (
+    EMBEDDING_DIM,
+    RegulationChunkModel,
+    SessionModel,
+    UserModel,
+    format_vector_literal,
+)
 
 load_dotenv()
 
@@ -168,11 +174,6 @@ def compute_embedding(
             exc,
         )
         return compute_trigram_embedding(text_content, dimensions=dimensions)
-
-
-def format_vector_literal(embedding: Sequence[float]) -> str:
-    """Formata uma sequencia de floats na sintaxe literal '[v1,v2,...]' exigida pelo pgvector."""
-    return "[" + ",".join(f"{float(x):.6f}" for x in embedding) + "]"
 
 
 def get_database_url() -> str:
