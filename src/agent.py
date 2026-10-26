@@ -11,13 +11,14 @@ de dados via SQLAlchemy 2.0 (PostgreSQL em producao/local e SQLite em testes).
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from contextvars import ContextVar
 import os
 from typing import Any
 
 from dotenv import load_dotenv
 from httpx import ConnectError
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_core.tools import tool
 from langchain_ollama import ChatOllama
 from langgraph.graph import MessagesState, START, StateGraph
@@ -26,12 +27,13 @@ from sqlalchemy.exc import OperationalError
 
 from src import repository
 from src.database import init_db
+from src.models import TaskStatus
 
 load_dotenv()
 
 
 # =============================================================================
-# 1. CONTEXTO DE SESSAO E ADAPTADOR DE LEITURA DO QUADRO DO PROJETO
+# 1. CONTEXTO DE SESSAO
 # =============================================================================
 
 _active_session_var: ContextVar[str] = ContextVar("active_session_id", default="default")
@@ -46,30 +48,6 @@ def set_active_session(session_id: str) -> None:
     """Define o identificador da sessao/evento ativo para as ferramentas e leituras do quadro."""
     cleaned = (session_id or "").strip() or "default"
     _active_session_var.set(cleaned)
-
-
-class ProjectBoardView:
-    """Adaptador de leitura que consulta sempre o banco de dados na sessao ativa."""
-
-    def to_dict(self) -> dict[str, Any]:
-        """Retorna um snapshot atualizado do quadro do projeto a partir do repositorio."""
-        return repository.get_project_board(session_id=get_active_session())
-
-    def __getitem__(self, key: str) -> Any:
-        return self.to_dict()[key]
-
-    def get(self, key: str, default: Any = None) -> Any:
-        return self.to_dict().get(key, default)
-
-    def __eq__(self, other: object) -> bool:
-        if isinstance(other, dict):
-            return self.to_dict() == other
-        if isinstance(other, ProjectBoardView):
-            return self.to_dict() == other.to_dict()
-        return False
-
-
-project_board = ProjectBoardView()
 
 
 def get_users() -> list[str]:
@@ -92,12 +70,16 @@ def register_task(
 
     Use this when a participant asks to create, add, assign, or remember a task.
     """
-    task = repository.create_task(
-        title=title,
-        owner=owner,
-        deadline=deadline,
-        session_id=get_active_session(),
-    )
+    try:
+        task = repository.create_task(
+            title=title,
+            owner=owner,
+            deadline=deadline,
+            session_id=get_active_session(),
+        )
+    except ValueError as exc:
+        return f"Erro de validacao ao criar tarefa: {exc}"
+
     return (
         f"Tarefa #{task['id']} registrada: {task['title']} | "
         f"responsavel: {task['owner']} | prazo: {task['deadline']}."
@@ -107,21 +89,26 @@ def register_task(
 @tool
 def update_task(
     task_id: int,
-    status: str | None = None,
+    status: TaskStatus | str | None = None,
     owner: str | None = None,
     deadline: str | None = None,
 ) -> str:
     """Update an existing planning task's status, owner, or deadline.
 
+    Allowed status values: 'pendente', 'em_andamento', 'concluida', 'cancelada'.
     Use this when a participant asks to complete, reassign, reschedule, or update a task.
     """
-    updated = repository.update_task_by_id(
-        task_id=task_id,
-        status=status,
-        owner=owner,
-        deadline=deadline,
-        session_id=get_active_session(),
-    )
+    try:
+        updated = repository.update_task_by_id(
+            task_id=task_id,
+            status=status,
+            owner=owner,
+            deadline=deadline,
+            session_id=get_active_session(),
+        )
+    except ValueError as exc:
+        return f"Erro de validacao ao atualizar tarefa #{task_id}: {exc}"
+
     if updated is None:
         return f"Tarefa #{task_id} nao encontrada."
 
@@ -232,7 +219,7 @@ tools = [
 
 
 # =============================================================================
-# 3. LLM + PROMPT DO SISTEMA
+# 3. LLM + PROMPT DO SISTEMA + BUILDER DO GRAFO REACT
 # =============================================================================
 
 SYSTEM_PROMPT = """
@@ -250,37 +237,112 @@ ou organizar informacoes do projeto. Depois de usar uma ferramenta, explique
 em linguagem natural o que foi feito e sugira o proximo passo colaborativo.
 """.strip()
 
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2")
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
-llm = ChatOllama(
-    model=OLLAMA_MODEL,
-    base_url=OLLAMA_BASE_URL,
-    temperature=0,
-).bind_tools(tools)
+def build_llm(
+    model: str | None = None,
+    base_url: str | None = None,
+) -> Any:
+    """Cria uma instancia do modelo ChatOllama vinculada as ferramentas do agente."""
+    resolved_model = model or os.getenv("OLLAMA_MODEL", "llama3.2")
+    resolved_url = base_url or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    return ChatOllama(
+        model=resolved_model,
+        base_url=resolved_url,
+        temperature=0,
+    ).bind_tools(tools)
 
 
-# =============================================================================
-# 4. GRAFO REACT COM LANGGRAPH
-# =============================================================================
+llm = build_llm()
+
+
+def _format_messages_for_llm(messages: list[BaseMessage]) -> list[BaseMessage]:
+    """Injeta o nome do participante no texto enviado ao LLM sem poluir a mensagem persistida."""
+    formatted: list[BaseMessage] = [SystemMessage(content=SYSTEM_PROMPT)]
+    for msg in messages:
+        if isinstance(msg, HumanMessage) and getattr(msg, "name", None):
+            text_content = str(msg.content or "")
+            if not text_content.startswith(f"[{msg.name}]"):
+                formatted.append(
+                    HumanMessage(content=f"[{msg.name}] {text_content}", name=msg.name)
+                )
+                continue
+        formatted.append(msg)
+    return formatted
 
 
 def agent(state: MessagesState) -> MessagesState:
-    """Call the LLM. It may answer directly or request tool calls."""
-    messages = [SystemMessage(content=SYSTEM_PROMPT)] + state["messages"]
+    """Invoca o LLM com o prompt do sistema e o historico formatado."""
+    messages = _format_messages_for_llm(state["messages"])
     response = llm.invoke(messages)
     return {"messages": [response]}
 
 
-graph = StateGraph(MessagesState)
-graph.add_node("agent", agent)
-graph.add_node("tools", ToolNode(tools))
+def build_agent(custom_llm: Any = None) -> Any:
+    """Constroi e compila o StateGraph ReAct de forma isolada."""
+    def _agent_node(state: MessagesState) -> MessagesState:
+        active_llm = custom_llm if custom_llm is not None else llm
+        messages = _format_messages_for_llm(state["messages"])
+        response = active_llm.invoke(messages)
+        return {"messages": [response]}
 
-graph.add_edge(START, "agent")
-graph.add_conditional_edges("agent", tools_condition)
-graph.add_edge("tools", "agent")
+    workflow = StateGraph(MessagesState)
+    workflow.add_node("agent", _agent_node)
+    workflow.add_node("tools", ToolNode(tools))
 
-react_event_agent = graph.compile()
+    workflow.add_edge(START, "agent")
+    workflow.add_conditional_edges("agent", tools_condition)
+    workflow.add_edge("tools", "agent")
+    return workflow.compile()
+
+
+react_event_agent = build_agent()
+
+
+# =============================================================================
+# 4. SERVICO UNIFICADO DE TURNO (CLI & UI)
+# =============================================================================
+
+
+def run_turn(
+    user_input: str,
+    session_id: str = "default",
+    author: str | None = None,
+    on_step: Callable[[MessagesState], None] | None = None,
+    compiled_agent: Any = None,
+) -> list[BaseMessage]:
+    """Executa um turno completo de conversa (contexto -> grafo ReAct -> persistencia no banco)."""
+    set_active_session(session_id)
+    context_history = repository.load_context_messages(session_id=session_id)
+    cleaned_author = (author or "").strip() or None
+    user_message = (
+        HumanMessage(content=user_input, name=cleaned_author)
+        if cleaned_author
+        else HumanMessage(content=user_input)
+    )
+    pending_history = [*context_history, user_message]
+    initial_count = len(context_history)
+
+    runner = compiled_agent if compiled_agent is not None else react_event_agent
+    final_step: MessagesState | None = None
+
+    for step in runner.stream(
+        {"messages": pending_history},
+        stream_mode="values",
+    ):
+        final_step = step
+        if on_step is not None and len(step["messages"]) > initial_count + 1:
+            on_step(step)
+
+    if final_step is None:
+        return []
+
+    new_messages = list(final_step["messages"][initial_count:])
+    repository.append_messages(
+        new_messages,
+        session_id=session_id,
+        default_author=cleaned_author,
+    )
+    return new_messages
 
 
 # =============================================================================
@@ -324,19 +386,12 @@ def main() -> None:
         if user_input.strip().lower() in {"exit", "quit"}:
             break
 
-        context_history = repository.load_context_messages(session_id=active_session)
-        user_message = HumanMessage(content=user_input)
-        pending_history = [*context_history, user_message]
-        initial_count = len(context_history)
-        step = None
-
         try:
-            for step in react_event_agent.stream(
-                {"messages": pending_history},
-                stream_mode="values",
-            ):
-                if len(step["messages"]) > initial_count + 1:
-                    print_step(step)
+            run_turn(
+                user_input=user_input,
+                session_id=active_session,
+                on_step=print_step,
+            )
         except ConnectError:
             print("\nNao consegui conectar ao Ollama.")
             print("Abra outro terminal e execute: ollama serve")
@@ -348,9 +403,6 @@ def main() -> None:
             print("Verifique se o container PostgreSQL continua ativo (docker compose ps).\n")
             break
 
-        if step is not None:
-            new_messages = step["messages"][initial_count:]
-            repository.append_messages(new_messages, session_id=active_session)
         print()
 
 

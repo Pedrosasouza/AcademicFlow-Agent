@@ -7,6 +7,7 @@ from __future__ import annotations
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 import hashlib
+import logging
 import math
 import os
 from pathlib import Path
@@ -16,14 +17,18 @@ import unicodedata
 from alembic import command
 from alembic.config import Config
 from dotenv import load_dotenv
+from httpx import ConnectError, HTTPError
 from langchain_ollama import OllamaEmbeddings
 from sqlalchemy import Engine, create_engine, inspect, select, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from src.models import Base, EMBEDDING_DIM, RegulationChunkModel, UserModel
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_DATABASE_URL = (
     "postgresql+psycopg://postgres:postgres@localhost:5432/academic_flow"
@@ -135,7 +140,11 @@ def compute_embedding(
 
     try:
         return compute_ollama_embedding(text_content, dimensions=dimensions)
-    except Exception:
+    except (ConnectError, HTTPError, RuntimeError, ValueError) as exc:
+        logger.warning(
+            "Falha ao gerar embedding via Ollama (%s); utilizando fallback de n-gramas.",
+            exc,
+        )
         return compute_trigram_embedding(text_content, dimensions=dimensions)
 
 
@@ -223,7 +232,11 @@ def _enable_pgvector_if_available(engine: Engine) -> None:
         with engine.begin() as conn:
             conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         _pgvector_enabled = True
-    except Exception:
+    except SQLAlchemyError as exc:
+        logger.warning(
+            "Extensao pgvector indisponivel no PostgreSQL (%s); busca vetorial usara fallback em memoria.",
+            exc,
+        )
         _pgvector_enabled = False
 
 

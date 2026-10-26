@@ -1,8 +1,8 @@
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from src import agent
+from src import agent, repository
 
 
 def test_available_users_are_defined_for_simulated_multiuser_flow():
@@ -64,17 +64,19 @@ def test_react_graph_executes_tool_call_cycle_without_ollama():
             {
                 "messages": [
                     HumanMessage(
-                        content="[user:Alice] Crie uma tarefa para reservar o auditorio ate sexta-feira."
+                        content="Crie uma tarefa para reservar o auditorio ate sexta-feira.",
+                        name="Alice",
                     )
                 ]
             }
         )
 
     assert mock_llm.invoke.call_count == 2
-    assert len(agent.project_board["tasks"]) == 1
-    assert agent.project_board["tasks"][0]["title"] == "Reservar auditorio"
-    assert agent.project_board["tasks"][0]["owner"] == "Alice"
-    assert agent.project_board["tasks"][0]["deadline"] == "sexta-feira"
+    tasks = repository.get_project_board()["tasks"]
+    assert len(tasks) == 1
+    assert tasks[0]["title"] == "Reservar auditorio"
+    assert tasks[0]["owner"] == "Alice"
+    assert tasks[0]["deadline"] == "sexta-feira"
 
     messages = result["messages"]
     assert len(messages) == 4
@@ -93,9 +95,30 @@ def test_react_graph_answers_directly_when_no_tool_is_needed():
         mock_llm.invoke.return_value = direct_reply
 
         result = agent.react_event_agent.invoke(
-            {"messages": [HumanMessage(content="[user:Bob] Ola!")]}
+            {"messages": [HumanMessage(content="Ola!", name="Bob")]}
         )
 
     assert mock_llm.invoke.call_count == 1
     assert len(result["messages"]) == 2
     assert result["messages"][-1].content == direct_reply.content
+
+
+def test_run_turn_and_build_agent_persist_clean_author_without_user_prefix():
+    """Garante que run_turn e build_agent persistem o turno com author/user_id limpos."""
+    custom_llm = MagicMock()
+    custom_llm.invoke.return_value = AIMessage(content="Entendido, Alice!")
+    isolated_graph = agent.build_agent(custom_llm=custom_llm)
+
+    new_msgs = agent.run_turn(
+        user_input="Vamos definir o cronograma.",
+        session_id="sala_teste",
+        author="Alice",
+        compiled_agent=isolated_graph,
+    )
+
+    assert len(new_msgs) == 2
+    saved_history = repository.load_messages(session_id="sala_teste")
+    assert len(saved_history) == 2
+    assert isinstance(saved_history[0], HumanMessage)
+    assert saved_history[0].content == "Vamos definir o cronograma."
+    assert saved_history[0].name == "Alice"

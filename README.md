@@ -62,10 +62,10 @@ flowchart LR
 O esquema é gerenciado por migrações versionadas do **Alembic** (`run_migrations("head")`) como fonte única da verdade para o DDL na inicialização da aplicação (`init_db()` em `src/database.py`), realizando em seguida o *seed* idempotente dos participantes padrão (`Alice`, `Bob`, `Charlie`) e normas institucionais:
 
 - `users`: Participantes cadastrados (`id`, `name`, `created_at`).
-- `tasks`: Tarefas do planejamento isoladas por sala (`id`, `session_id`, `title`, `owner`, `deadline`, `status`, `created_at`).
+- `tasks`: Tarefas do planejamento isoladas por sala (`id`, `session_id`, `title`, `owner`, `owner_id` FK para `users.id`, `deadline`, `status` validado via `TaskStatus`, `created_at`).
 - `decisions`: Decisões tomadas e justificativas por sala (`id`, `session_id`, `decision`, `reason`, `created_at`).
 - `document_sections`: Seções do plano com unicidade composta `(session_id, section)` (`id`, `session_id`, `section`, `text`, `updated_at`).
-- `chat_messages`: Histórico de mensagens (`id`, `session_id`, `role`, `content`, `tool_calls` em JSON, `tool_call_id`, `created_at`).
+- `chat_messages`: Histórico de mensagens (`id`, `session_id`, `role`, `author`, `user_id` FK para `users.id`, `content`, `tool_calls` em JSON, `tool_call_id`, `created_at`).
 - `regulation_chunks`: Base vetorial de editais e normas institucionais (`id`, `source`, `title`, `content`, `embedding`, `created_at`) com coluna nativa `vector(768)` e índice **HNSW** (`vector_cosine_ops`) no PostgreSQL (`pgvector`), gerando embeddings via `OllamaEmbeddings`.
 
 ---

@@ -5,8 +5,9 @@ Camada de repositorio (Data Access Layer) centralizando todas as operacoes no ba
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import date, datetime
 import math
+import re
 from typing import Any
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
@@ -27,10 +28,13 @@ from src.models import (
     DocumentSectionModel,
     RegulationChunkModel,
     TaskModel,
+    TaskStatus,
     UserModel,
 )
 
 MAX_CONTEXT_MESSAGES = 20
+_LEGACY_USER_PREFIX_RE = re.compile(r"^\[user:([^\]]+)\]\s*(.*)$", re.DOTALL)
+_ISO_DATE_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}")
 
 
 def _now() -> str:
@@ -38,16 +42,59 @@ def _now() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M")
 
 
-def _normalize_owner(session: Session, owner: str | None) -> str:
-    """Normaliza o nome do responsavel caso coincida (case-insensitive) com um usuario cadastrado."""
-    cleaned = (owner or "").strip()
+def _resolve_user(session: Session, raw_name: str | None) -> tuple[str, int | None]:
+    """Resolve o nome normalizado e o ID relacional (FK) caso coincida com um usuario cadastrado."""
+    cleaned = (raw_name or "").strip()
+    if not cleaned:
+        return "a definir", None
+
+    users = session.scalars(select(UserModel)).all()
+    for user in users:
+        if user.name.lower() == cleaned.lower():
+            return user.name, user.id
+    return cleaned, None
+
+
+def validate_task_status(status: str | TaskStatus) -> str:
+    """Valida se o status informado pertence ao enum TaskStatus."""
+    if isinstance(status, TaskStatus):
+        return status.value
+    cleaned = (status or "").strip().lower()
+    try:
+        return TaskStatus(cleaned).value
+    except ValueError as exc:
+        valid_values = ", ".join(s.value for s in TaskStatus)
+        raise ValueError(
+            f"Status invalido '{status}'. Valores permitidos: {valid_values}."
+        ) from exc
+
+
+def normalize_deadline(deadline: str | datetime | date | None) -> str:
+    """Normaliza e valida um prazo (aceitando datetime/date, string ISO-8601 valida ou prazo textual)."""
+    if deadline is None:
+        return "a definir"
+    if isinstance(deadline, datetime):
+        return deadline.strftime("%Y-%m-%d %H:%M") if (deadline.hour or deadline.minute) else deadline.strftime("%Y-%m-%d")
+    if isinstance(deadline, date):
+        return deadline.isoformat()
+
+    cleaned = str(deadline).strip()
     if not cleaned:
         return "a definir"
 
-    registered_users = session.scalars(select(UserModel.name)).all()
-    for user_name in registered_users:
-        if user_name.lower() == cleaned.lower():
-            return user_name
+    if _ISO_DATE_PREFIX_RE.match(cleaned):
+        try:
+            parsed = datetime.fromisoformat(cleaned)
+            return (
+                parsed.strftime("%Y-%m-%d %H:%M")
+                if ("T" in cleaned or " " in cleaned)
+                else parsed.strftime("%Y-%m-%d")
+            )
+        except ValueError as exc:
+            raise ValueError(
+                f"Prazo em formato ISO invalido: '{cleaned}'. Use YYYY-MM-DD."
+            ) from exc
+
     return cleaned
 
 
@@ -57,6 +104,7 @@ def _task_to_dict(task: TaskModel) -> dict[str, Any]:
         "id": task.id,
         "title": task.title,
         "owner": task.owner,
+        "owner_id": task.owner_id,
         "deadline": task.deadline,
         "status": task.status,
         "created_at": task.created_at,
@@ -214,20 +262,21 @@ def list_sessions() -> list[str]:
 def create_task(
     title: str,
     owner: str | None = None,
-    deadline: str | None = None,
+    deadline: str | datetime | date | None = None,
     session_id: str = "default",
 ) -> dict[str, Any]:
     """Cria uma nova tarefa no banco para a sessao informada e retorna seus dados como dicionario."""
+    normalized_deadline = normalize_deadline(deadline)
     with get_db_session() as session:
-        normalized_owner = _normalize_owner(session, owner)
-        normalized_deadline = (deadline or "").strip() or "a definir"
+        normalized_owner, owner_id = _resolve_user(session, owner)
 
         task = TaskModel(
             session_id=session_id,
             title=title,
             owner=normalized_owner,
+            owner_id=owner_id,
             deadline=normalized_deadline,
-            status="pendente",
+            status=TaskStatus.PENDING.value,
             created_at=_now(),
         )
         session.add(task)
@@ -237,23 +286,28 @@ def create_task(
 
 def update_task_by_id(
     task_id: int,
-    status: str | None = None,
+    status: str | TaskStatus | None = None,
     owner: str | None = None,
-    deadline: str | None = None,
+    deadline: str | datetime | date | None = None,
     session_id: str = "default",
 ) -> dict[str, Any] | None:
     """Atualiza campos de uma tarefa existente na sessao pelo ID ou retorna None se nao encontrada."""
+    validated_status = validate_task_status(status) if status else None
+    normalized_deadline = normalize_deadline(deadline) if deadline else None
+
     with get_db_session() as session:
         task = session.get(TaskModel, task_id)
         if task is None or task.session_id != session_id:
             return None
 
-        if status:
-            task.status = status
+        if validated_status:
+            task.status = validated_status
         if owner:
-            task.owner = _normalize_owner(session, owner)
-        if deadline:
-            task.deadline = deadline
+            normalized_owner, owner_id = _resolve_user(session, owner)
+            task.owner = normalized_owner
+            task.owner_id = owner_id
+        if normalized_deadline:
+            task.deadline = normalized_deadline
 
         session.flush()
         return _task_to_dict(task)
@@ -359,22 +413,56 @@ def get_project_board(session_id: str = "default") -> dict[str, Any]:
     }
 
 
+def _extract_author_and_clean_content(
+    msg: HumanMessage,
+    default_author: str | None = None,
+) -> tuple[str | None, str]:
+    """Extrai o autor da mensagem e remove eventual prefixo legado '[user:X]' do conteudo."""
+    raw_content = str(msg.content or "")
+    explicit_author = (
+        getattr(msg, "name", None)
+        or msg.additional_kwargs.get("author")
+        or default_author
+    )
+
+    match = _LEGACY_USER_PREFIX_RE.match(raw_content)
+    if match:
+        prefix_author, clean_body = match.group(1).strip(), match.group(2)
+        return (explicit_author or prefix_author or None), clean_body
+
+    cleaned_author = str(explicit_author).strip() if explicit_author else None
+    return (cleaned_author or None), raw_content
+
+
 def append_messages(
     messages: Sequence[BaseMessage],
     session_id: str = "default",
+    default_author: str | None = None,
 ) -> None:
-    """Persiste apenas as novas mensagens de um turno mantendo a ordem cronologica."""
+    """Persiste apenas as novas mensagens de um turno mantendo a ordem cronologica e autoria relacional."""
     if not messages:
         return
 
     with get_db_session() as session:
         for msg in messages:
             if isinstance(msg, HumanMessage):
+                raw_author, clean_content = _extract_author_and_clean_content(
+                    msg, default_author=default_author
+                )
+                author_name: str | None = None
+                user_id: int | None = None
+                if raw_author:
+                    resolved_name, resolved_id = _resolve_user(session, raw_author)
+                    author_name = resolved_name
+                    user_id = resolved_id
+
                 session.add(
                     ChatMessageModel(
                         session_id=session_id,
                         role="human",
-                        content=str(msg.content),
+                        author=author_name,
+                        user_id=user_id,
+                        content=clean_content,
                         tool_calls=None,
                         tool_call_id=None,
                     )
@@ -386,6 +474,8 @@ def append_messages(
                     ChatMessageModel(
                         session_id=session_id,
                         role="ai",
+                        author=None,
+                        user_id=None,
                         content=str(msg.content or ""),
                         tool_calls=serialized_calls,
                         tool_call_id=None,
@@ -396,6 +486,8 @@ def append_messages(
                     ChatMessageModel(
                         session_id=session_id,
                         role="tool",
+                        author=None,
+                        user_id=None,
                         content=str(msg.content),
                         tool_calls=None,
                         tool_call_id=getattr(msg, "tool_call_id", None),
@@ -415,7 +507,10 @@ def load_messages(session_id: str = "default") -> list[BaseMessage]:
         history: list[BaseMessage] = []
         for row in rows:
             if row.role == "human":
-                history.append(HumanMessage(content=row.content))
+                if row.author:
+                    history.append(HumanMessage(content=row.content, name=row.author))
+                else:
+                    history.append(HumanMessage(content=row.content))
             elif row.role == "ai":
                 history.append(
                     AIMessage(

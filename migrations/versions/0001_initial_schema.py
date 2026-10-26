@@ -47,12 +47,15 @@ def upgrade() -> None:
         sa.Column("session_id", sa.String(length=100), nullable=False, server_default="default"),
         sa.Column("title", sa.String(length=255), nullable=False),
         sa.Column("owner", sa.String(length=100), nullable=False),
+        sa.Column("owner_id", sa.Integer(), nullable=True),
         sa.Column("deadline", sa.String(length=100), nullable=False),
         sa.Column("status", sa.String(length=50), nullable=False),
         sa.Column("created_at", sa.String(length=20), nullable=False),
+        sa.ForeignKeyConstraint(["owner_id"], ["users.id"], ondelete="SET NULL"),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index(op.f("ix_tasks_session_id"), "tasks", ["session_id"], unique=False)
+    op.create_index(op.f("ix_tasks_owner_id"), "tasks", ["owner_id"], unique=False)
 
     op.create_table(
         "decisions",
@@ -95,6 +98,8 @@ def upgrade() -> None:
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
         sa.Column("session_id", sa.String(length=100), nullable=False, server_default="default"),
         sa.Column("role", sa.String(length=20), nullable=False),
+        sa.Column("author", sa.String(length=100), nullable=True),
+        sa.Column("user_id", sa.Integer(), nullable=True),
         sa.Column("content", sa.Text(), nullable=False),
         sa.Column("tool_calls", sa.JSON(), nullable=True),
         sa.Column("tool_call_id", sa.String(length=100), nullable=True),
@@ -104,12 +109,19 @@ def upgrade() -> None:
             server_default=sa.func.now(),
             nullable=False,
         ),
+        sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="SET NULL"),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index(
         op.f("ix_chat_messages_session_id"),
         "chat_messages",
         ["session_id"],
+        unique=False,
+    )
+    op.create_index(
+        op.f("ix_chat_messages_user_id"),
+        "chat_messages",
+        ["user_id"],
         unique=False,
     )
 
@@ -151,6 +163,7 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_regulation_chunks_source"), table_name="regulation_chunks")
     op.drop_table("regulation_chunks")
 
+    op.drop_index(op.f("ix_chat_messages_user_id"), table_name="chat_messages")
     op.drop_index(op.f("ix_chat_messages_session_id"), table_name="chat_messages")
     op.drop_table("chat_messages")
 
@@ -161,6 +174,7 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_decisions_session_id"), table_name="decisions")
     op.drop_table("decisions")
 
+    op.drop_index(op.f("ix_tasks_owner_id"), table_name="tasks")
     op.drop_index(op.f("ix_tasks_session_id"), table_name="tasks")
     op.drop_table("tasks")
 

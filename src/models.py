@@ -5,9 +5,10 @@ Modelos ORM com SQLAlchemy 2.0 para persistencia relacional do AcademicFlow-Agen
 from __future__ import annotations
 
 from datetime import datetime
+from enum import StrEnum
 from typing import Any
 
-from sqlalchemy import DateTime, Integer, JSON, String, Text, UniqueConstraint, func
+from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, func
 from sqlalchemy.engine import Dialect
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator, TypeEngine, UserDefinedType
@@ -69,6 +70,15 @@ class PgVectorType(TypeDecorator[list[float]]):
         return [float(x) for x in value]
 
 
+class TaskStatus(StrEnum):
+    """Estados validos no ciclo de vida de uma tarefa do planejamento."""
+
+    PENDING = "pendente"
+    IN_PROGRESS = "em_andamento"
+    COMPLETED = "concluida"
+    CANCELLED = "cancelada"
+
+
 class Base(DeclarativeBase):
     """Classe base declarativa do SQLAlchemy 2.0 para mapeamento das tabelas."""
 
@@ -96,8 +106,13 @@ class TaskModel(Base):
     )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     owner: Mapped[str] = mapped_column(String(100), default="a definir", nullable=False)
+    owner_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True, nullable=True
+    )
     deadline: Mapped[str] = mapped_column(String(100), default="a definir", nullable=False)
-    status: Mapped[str] = mapped_column(String(50), default="pendente", nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(50), default=TaskStatus.PENDING.value, nullable=False
+    )
     created_at: Mapped[str] = mapped_column(String(20), nullable=False)
 
 
@@ -142,6 +157,10 @@ class ChatMessageModel(Base):
         String(100), default="default", index=True, nullable=False
     )
     role: Mapped[str] = mapped_column(String(20), nullable=False)
+    author: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True, nullable=True
+    )
     content: Mapped[str] = mapped_column(Text, default="", nullable=False)
     tool_calls: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
     tool_call_id: Mapped[str | None] = mapped_column(String(100), nullable=True)

@@ -493,6 +493,53 @@ def test_alembic_migrations_upgrade_and_downgrade_cleanly(monkeypatch, tmp_path)
     assert remaining_tables == set()
 
 
+def test_chat_message_persists_author_and_user_id_fk_without_prefix():
+    """Garante que append_messages vincula user_id (FK) e salva content sem prefixo '[user:X]'."""
+    repository.append_messages(
+        [
+            HumanMessage(content="[user:alice] Primeira mensagem com prefixo legado"),
+            HumanMessage(content="Segunda mensagem limpa", name="Bob"),
+        ],
+        session_id="default",
+    )
+
+    with database.get_db_session() as session:
+        rows = session.scalars(
+            select(models.ChatMessageModel).order_by(models.ChatMessageModel.id)
+        ).all()
+        assert len(rows) == 2
+        assert rows[0].author == "Alice"
+        assert rows[0].user_id is not None
+        assert rows[0].content == "Primeira mensagem com prefixo legado"
+        assert rows[1].author == "Bob"
+        assert rows[1].user_id is not None
+        assert rows[1].content == "Segunda mensagem limpa"
+
+    loaded = repository.load_messages(session_id="default")
+    assert loaded[0].content == "Primeira mensagem com prefixo legado"
+    assert loaded[0].name == "Alice"
+    assert loaded[1].content == "Segunda mensagem limpa"
+    assert loaded[1].name == "Bob"
+
+
+def test_compute_embedding_logs_warning_on_ollama_connection_error(monkeypatch, caplog):
+    """Garante que falhas de rede no Ollama geram log warning estruturado antes do fallback."""
+    from httpx import ConnectError
+
+    def broken_embedder(**kwargs):
+        raise ConnectError("Ollama indisponivel")
+
+    monkeypatch.setenv("EMBEDDING_PROVIDER", "ollama")
+    monkeypatch.setattr(database, "OllamaEmbeddings", broken_embedder)
+
+    with caplog.at_level("WARNING"):
+        vec = database.compute_embedding("texto para testar log de fallback")
+
+    assert len(vec) == models.EMBEDDING_DIM
+    assert "Falha ao gerar embedding via Ollama" in caplog.text
+
+
+
 
 
 

@@ -18,6 +18,7 @@ from src import repository
 from src.database import init_db
 
 LOGO_PATH = PROJECT_ROOT / "assets" / "logo.png"
+LIVE_REFRESH_INTERVAL = "5s"
 
 
 def _get_current_session() -> str:
@@ -191,13 +192,16 @@ def _render_board_summary() -> None:
 
 
 def _render_chat_history() -> None:
-    """Renderiza as mensagens do usuario e respostas finais do assistente no chat."""
+    """Renderiza as mensagens do usuario (com autoria) e respostas finais do assistente no chat."""
     for message in st.session_state.messages:
         role = _message_role(message)
         if role is None:
             continue
 
         with st.chat_message(role):
+            author = getattr(message, "name", None) if role == "user" else None
+            if author:
+                st.caption(f"👤 {author}")
             st.markdown(message.content)
 
 
@@ -220,6 +224,18 @@ def _sync_session_state_from_db(
     st.session_state.tools_called = _extract_tools_called(messages)
     if "current_user" not in st.session_state and usuarios:
         st.session_state.current_user = usuarios[0]
+
+
+@st.fragment(run_every=LIVE_REFRESH_INTERVAL)
+def _render_live_collaboration_view(
+    usuarios: list[str],
+    active_session: str,
+) -> None:
+    """Fragmento com autorefresh periodico para sincronizar o quadro e o chat multiusuario."""
+    _sync_session_state_from_db(usuarios, session_id=active_session)
+    _render_board_summary()
+    _render_tools_called()
+    _render_chat_history()
 
 
 def render_app() -> None:
@@ -272,32 +288,22 @@ def render_app() -> None:
         st.stop()
 
     _render_user_chooser(usuarios, session_id=active_session)
-    _render_board_summary()
     _render_regulations_panel()
-    _render_tools_called()
-    _render_chat_history()
+    _render_live_collaboration_view(usuarios, active_session=active_session)
 
     user_prompt = st.chat_input("Escreva sua mensagem para o agente...")
 
     if user_prompt:
         sender = st.session_state.get("current_user") or "Usuário Desconhecido"
-        context_messages = repository.load_context_messages(session_id=active_session)
-        user_msg = HumanMessage(content=f"[user:{sender}] {user_prompt}")
-        pending_messages = [*context_messages, user_msg]
-        initial_count = len(context_messages)
 
         with st.spinner("Processando com o agente..."):
-            final_step = None
             try:
-                react_agent.set_active_session(active_session)
-                for step in react_agent.react_event_agent.stream(
-                    {"messages": pending_messages},
-                    stream_mode="values",
-                ):
-                    final_step = step
-                    if len(step["messages"]) > initial_count + 1:
-                        react_agent.print_step(step)
-
+                react_agent.run_turn(
+                    user_input=user_prompt,
+                    session_id=active_session,
+                    author=sender,
+                    on_step=react_agent.print_step,
+                )
             except ConnectError:
                 st.error(
                     "Não consegui conectar ao Ollama. Verifique se o serviço está ativo com `ollama serve` e se o modelo `llama3.2` foi baixado."
@@ -309,9 +315,6 @@ def render_app() -> None:
                 )
                 st.stop()
 
-            if final_step:
-                new_messages = final_step["messages"][initial_count:]
-                repository.append_messages(new_messages, session_id=active_session)
             _sync_session_state_from_db(usuarios, session_id=active_session)
             st.rerun()
 
