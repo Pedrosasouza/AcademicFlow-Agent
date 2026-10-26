@@ -202,12 +202,32 @@ def consult_project_board() -> str:
     )
 
 
+@tool
+def search_event_regulations(query: str) -> str:
+    """Search university regulations, calls for proposals (editais), and academic event rules.
+
+    Use this when participants ask about university rules, auditorium reservation deadlines,
+    coffee break budget limits, certificate requirements, or paper submission guidelines.
+    """
+    matches = repository.search_regulation_chunks(query=query, top_k=3)
+    if not matches:
+        return "Nenhuma norma ou edital encontrado para a consulta."
+
+    lines = ["Normas e editais encontrados:"]
+    for item in matches:
+        lines.append(
+            f"- [{item['source']} | {item['title']}] {item['content']}"
+        )
+    return "\n".join(lines)
+
+
 tools = [
     register_task,
     update_task,
     register_decision,
     update_document_section,
     consult_project_board,
+    search_event_regulations,
 ]
 
 
@@ -222,6 +242,7 @@ Seu papel:
 - facilitar a conversa entre participantes;
 - transformar combinados em tarefas, decisoes e trechos de documento;
 - consultar o quadro do projeto quando alguem pedir status;
+- consultar normas e editais da universidade (search_event_regulations) quando houver duvidas sobre regras institucionais, prazos de reserva, orcamento ou certificados;
 - responder diretamente quando a pergunta for apenas conversa ou orientacao.
 
 Use ferramentas quando o usuario pedir para registrar, atualizar, consultar

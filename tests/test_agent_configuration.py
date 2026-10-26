@@ -18,6 +18,7 @@ def test_agent_tools_include_collaboration_and_coordination_actions():
         "register_decision",
         "update_document_section",
         "consult_project_board",
+        "search_event_regulations",
     }
 
 

@@ -124,6 +124,28 @@ def _render_user_chooser(usuarios: list[str], session_id: str) -> None:
             st.rerun()
 
 
+def _render_regulations_panel() -> None:
+    """Renderiza na barra lateral a base vetorial de editais e permite indexar novas normas."""
+    with st.sidebar:
+        with st.expander("📚 Editais e Normas (RAG pgvector)", expanded=False):
+            chunks = repository.list_regulation_chunks()
+            st.caption(f"{len(chunks)} normas indexadas na base vetorial.")
+            for item in chunks:
+                st.markdown(f"**{item['title']}** *({item['source']})*  \n{item['content']}")
+            st.markdown("---")
+            source = st.text_input("Fonte / Edital", placeholder="Ex: Edital PRCEU 03/2026")
+            title = st.text_input("Título da Regra", placeholder="Ex: Diárias de Palestrantes")
+            content = st.text_area("Texto da Norma")
+            if st.button("Indexar norma no banco"):
+                if title.strip() and content.strip():
+                    repository.index_regulation_chunk(
+                        source=source.strip() or "Edital Institucional",
+                        title=title.strip(),
+                        content=content.strip(),
+                    )
+                    st.rerun()
+
+
 def _render_board_summary() -> None:
     """Renderiza as metricas, tarefas, decisoes e secoes do quadro do projeto."""
     with st.sidebar:
@@ -244,6 +266,7 @@ def render_app() -> None:
 
     _render_user_chooser(usuarios, session_id=active_session)
     _render_board_summary()
+    _render_regulations_panel()
     _render_tools_called()
     _render_chat_history()
 

@@ -6,17 +6,26 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import datetime
+import math
 from typing import Any
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from sqlalchemy import delete, select, text
 from sqlalchemy.orm import Session
 
-from src.database import get_db_session, get_engine, init_db
+from src import database
+from src.database import (
+    compute_deterministic_embedding,
+    format_vector_literal,
+    get_db_session,
+    get_engine,
+    init_db,
+)
 from src.models import (
     ChatMessageModel,
     DecisionModel,
     DocumentSectionModel,
+    RegulationChunkModel,
     TaskModel,
     UserModel,
 )
@@ -62,6 +71,127 @@ def _decision_to_dict(item: DecisionModel) -> dict[str, Any]:
         "reason": item.reason,
         "created_at": item.created_at,
     }
+
+
+def _cosine_similarity(vec_a: Sequence[float], vec_b: Sequence[float]) -> float:
+    """Calcula a similaridade de cosseno exata entre dois vetores de mesma dimensao."""
+    if len(vec_a) != len(vec_b) or not vec_a:
+        return 0.0
+    dot = sum(float(a) * float(b) for a, b in zip(vec_a, vec_b))
+    norm_a = math.sqrt(sum(float(a) * float(a) for a in vec_a))
+    norm_b = math.sqrt(sum(float(b) * float(b) for b in vec_b))
+    if norm_a == 0.0 or norm_b == 0.0:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+
+def compute_embedding(text_content: str) -> list[float]:
+    """Gera o vetor de embedding para indexacao e busca semantica nas normas da universidade."""
+    return compute_deterministic_embedding(text_content)
+
+
+def index_regulation_chunk(
+    source: str,
+    title: str,
+    content: str,
+    embedding: list[float] | None = None,
+) -> dict[str, Any]:
+    """Indexa um trecho de edital ou regulamento da universidade com seu vetor de embedding."""
+    init_db()
+    vec = list(embedding) if embedding is not None else compute_embedding(f"{title} {content}")
+    with get_db_session() as session:
+        chunk = RegulationChunkModel(
+            source=source.strip() or "Norma Institucional",
+            title=title.strip() or "Trecho sem titulo",
+            content=content.strip(),
+            dimensions=len(vec),
+            embedding=vec,
+            embedding_text=format_vector_literal(vec),
+        )
+        session.add(chunk)
+        session.flush()
+        return {
+            "id": chunk.id,
+            "source": chunk.source,
+            "title": chunk.title,
+            "content": chunk.content,
+            "dimensions": chunk.dimensions,
+        }
+
+
+def list_regulation_chunks() -> list[dict[str, Any]]:
+    """Lista todos os trechos de editais e regulamentos cadastrados na base vetorial."""
+    init_db()
+    with get_db_session() as session:
+        rows = session.scalars(
+            select(RegulationChunkModel).order_by(RegulationChunkModel.id)
+        ).all()
+        return [
+            {
+                "id": row.id,
+                "source": row.source,
+                "title": row.title,
+                "content": row.content,
+            }
+            for row in rows
+        ]
+
+
+def search_regulation_chunks(
+    query: str,
+    query_embedding: list[float] | None = None,
+    top_k: int = 3,
+) -> list[dict[str, Any]]:
+    """Busca os trechos de editais mais relevantes usando operador <=> do pgvector ou cosseno em memoria."""
+    init_db()
+    vec = list(query_embedding) if query_embedding is not None else compute_embedding(query)
+    dim = len(vec)
+    engine = get_engine()
+
+    with get_db_session() as session:
+        if engine.dialect.name == "postgresql" and database.is_pgvector_enabled():
+            stmt = text(
+                "SELECT id, source, title, content, "
+                "1.0 - (CAST(embedding_text AS vector) <=> CAST(:query_vec AS vector)) AS score "
+                "FROM regulation_chunks "
+                "WHERE dimensions = :dim "
+                "ORDER BY CAST(embedding_text AS vector) <=> CAST(:query_vec AS vector) "
+                "LIMIT :top_k"
+            )
+            rows = session.execute(
+                stmt,
+                {
+                    "query_vec": format_vector_literal(vec),
+                    "dim": dim,
+                    "top_k": top_k,
+                },
+            ).all()
+            return [
+                {
+                    "id": row._mapping["id"],
+                    "source": row._mapping["source"],
+                    "title": row._mapping["title"],
+                    "content": row._mapping["content"],
+                    "score": float(row._mapping["score"]),
+                }
+                for row in rows
+            ]
+
+        candidates = session.scalars(
+            select(RegulationChunkModel).where(RegulationChunkModel.dimensions == dim)
+        ).all()
+        scored = [
+            {
+                "id": item.id,
+                "source": item.source,
+                "title": item.title,
+                "content": item.content,
+                "score": _cosine_similarity(vec, item.embedding),
+            }
+            for item in candidates
+        ]
+        scored.sort(key=lambda r: r["score"], reverse=True)
+        return scored[:top_k]
 
 
 def list_users() -> list[str]:

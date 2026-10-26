@@ -90,3 +90,20 @@ class ChatMessageModel(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class RegulationChunkModel(Base):
+    """Trechos (chunks) de editais e normas da universidade indexados com vetores de embedding (RAG)."""
+
+    __tablename__ = "regulation_chunks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source: Mapped[str] = mapped_column(String(150), index=True, nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    dimensions: Mapped[int] = mapped_column(Integer, default=16, index=True, nullable=False)
+    embedding: Mapped[list[float]] = mapped_column(JSON, nullable=False)
+    embedding_text: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

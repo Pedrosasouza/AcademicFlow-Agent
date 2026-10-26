@@ -66,6 +66,7 @@ O esquema é criado programaticamente de forma idempotente na inicialização da
 - `decisions`: Decisões tomadas e justificativas por sala (`id`, `session_id`, `decision`, `reason`, `created_at`).
 - `document_sections`: Seções do plano com unicidade composta `(session_id, section)` (`id`, `session_id`, `section`, `text`, `updated_at`).
 - `chat_messages`: Histórico de mensagens (`id`, `session_id`, `role`, `content`, `tool_calls` em JSON, `tool_call_id`, `created_at`).
+- `regulation_chunks`: Base vetorial de editais e normas institucionais (`id`, `source`, `title`, `content`, `dimensions`, `embedding`, `embedding_text`, `created_at`) com busca semântica via operador `<=>` do `pgvector`.
 
 ---
 
@@ -78,6 +79,7 @@ O esquema é criado programaticamente de forma idempotente na inicialização da
 | ✅ Registro de decisões | `register_decision` | Persiste decisões importantes tomadas pelo grupo e suas justificativas |
 | 📄 Documento colaborativo | `update_document_section` | Cria ou atualiza (*upsert*) seções estruturadas do plano do evento |
 | 📊 Quadro do projeto | `consult_project_board` | Consulta e sintetiza o estado atual de tarefas, decisões e documentos no banco |
+| 📚 Busca em editais (RAG) | `search_event_regulations` | Busca semântica (`pgvector` `<=>` / similaridade de cosseno) em normas e editais da universidade |
 
 ---
 

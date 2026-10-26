@@ -186,3 +186,14 @@ def test_agent_tools_respect_active_session_context():
     assert agent.project_board["document_sections"] == {}
     assert "- nenhuma tarefa registrada" in agent.consult_project_board.invoke({})
 
+
+def test_search_event_regulations_returns_relevant_university_rules():
+    """Garante que a ferramenta RAG consulta as normas/editais da universidade por similaridade vetorial."""
+    result = agent.search_event_regulations.invoke(
+        {"query": "qual a antecedencia para reserva de auditorio e regras de coffee break?"}
+    )
+
+    assert "Normas e editais encontrados" in result
+    assert "Edital" in result or "Regimento" in result or "Auditorio" in result or "auditorio" in result.lower()
+
+

@@ -22,6 +22,7 @@ def test_init_db_creates_all_tables_and_seeds_default_users(monkeypatch):
         "decisions",
         "document_sections",
         "chat_messages",
+        "regulation_chunks",
     }.issubset(tables)
 
     with database.get_db_session() as session:
@@ -342,6 +343,74 @@ def test_list_sessions_and_selective_session_clear():
 
     assert repository.get_project_board(session_id="semana_computacao")["tasks"] == []
     assert len(repository.get_project_board(session_id="simposio_ia")["decisions"]) == 1
+
+
+def test_repository_index_and_vector_search_regulation_chunks():
+    """Indexa trechos de editais com embeddings e ordena a busca por similaridade vetorial."""
+    chunk_auditorio = repository.index_regulation_chunk(
+        source="Regimento ICMC-USP",
+        title="Reserva de Auditorio Exclusivo",
+        content="A solicitacao do auditorio principal exige 30 dias de antecedencia no sistema.",
+        embedding=[1.0, 0.0, 0.0, 0.0],
+    )
+    repository.index_regulation_chunk(
+        source="Edital PRCEU 02/2026",
+        title="Regras de Certificados",
+        content="A emissao de certificados exige presenca minima de 75 por cento.",
+        embedding=[0.0, 1.0, 0.0, 0.0],
+    )
+
+    assert chunk_auditorio["id"] >= 1
+    assert chunk_auditorio["title"] == "Reserva de Auditorio Exclusivo"
+
+    results = repository.search_regulation_chunks(
+        query="reserva auditorio",
+        query_embedding=[0.99, 0.01, 0.0, 0.0],
+        top_k=2,
+    )
+    assert len(results) >= 1
+    assert results[0]["title"] == "Reserva de Auditorio Exclusivo"
+    assert results[0]["score"] > 0.8
+
+
+def test_repository_executes_pgvector_cosine_operator_on_postgresql(monkeypatch):
+    """Garante que no PostgreSQL com pgvector ativo a busca usa o operador nativo <=>."""
+    from unittest.mock import MagicMock
+
+    mock_engine = MagicMock()
+    mock_engine.dialect.name = "postgresql"
+    mock_session = MagicMock()
+    mock_row = MagicMock()
+    mock_row._mapping = {
+        "id": 1,
+        "source": "Edital USP",
+        "title": "Norma de Teste",
+        "content": "Conteudo do edital",
+        "score": 0.95,
+    }
+    mock_session.execute.return_value.all.return_value = [mock_row]
+
+    @database.contextmanager
+    def fake_session():
+        yield mock_session
+
+    monkeypatch.setattr(repository, "init_db", lambda: None)
+    monkeypatch.setattr(repository, "get_engine", lambda: mock_engine)
+    monkeypatch.setattr(repository, "get_db_session", fake_session)
+    monkeypatch.setattr(database, "is_pgvector_enabled", lambda: True)
+
+    results = repository.search_regulation_chunks(
+        query="norma",
+        query_embedding=[0.5, 0.5, 0.0, 0.0],
+        top_k=1,
+    )
+
+    assert len(results) == 1
+    assert results[0]["title"] == "Norma de Teste"
+    executed_sql = str(mock_session.execute.call_args[0][0])
+    assert "<=>" in executed_sql
+    assert "vector" in executed_sql
+
 
 
 

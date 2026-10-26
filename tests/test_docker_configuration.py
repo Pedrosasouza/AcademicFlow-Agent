@@ -54,6 +54,7 @@ def test_docker_compose_defines_app_service_connected_to_postgres_and_host_ollam
     content = compose_path.read_text(encoding="utf-8")
 
     assert "postgres:" in content
+    assert "pgvector/pgvector:pg16" in content
     assert "app:" in content
     assert "build:" in content
     assert "condition: service_healthy" in content
