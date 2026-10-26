@@ -5,6 +5,7 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/Pedrosasouza/AcademicFlow-Agent/actions/workflows/tests.yml"><img src="https://github.com/Pedrosasouza/AcademicFlow-Agent/actions/workflows/tests.yml/badge.svg" alt="CI Tests" /></a>
   <img src="https://img.shields.io/badge/Python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white" />
   <img src="https://img.shields.io/badge/LangGraph-Agent_Framework-00ADD8?style=flat-square" />
   <img src="https://img.shields.io/badge/LangChain-LLM_Orchestration-1C3C3C?style=flat-square" />
@@ -84,6 +85,9 @@ O esquema é criado programaticamente de forma idempotente na inicialização da
 
 ```text
 AcademicFlow-Agent/
+├── .github/
+│   └── workflows/
+│       └── tests.yml                  # Pipeline de CI (Pytest em SQLite e PostgreSQL 16)
 ├── assets/
 │   └── logo.png                       # Identidade visual exibida na interface
 ├── docs/
@@ -176,7 +180,7 @@ $env:TEST_DATABASE_URL="postgresql+psycopg://postgres:postgres@localhost:5432/ac
 pytest tests/ -v
 ```
 
-Os roteiros de testes manuais e de aceitação estão documentados em [`docs/TEST_TEMPLATES.md`](docs/TEST_TEMPLATES.md).
+Os roteiros de testes manuais e de aceitação estão documentados em [`docs/TEST_TEMPLATES.md`](docs/TEST_TEMPLATES.md). A cada *push* ou *Pull Request*, o workflow [`.github/workflows/tests.yml`](.github/workflows/tests.yml) executa automaticamente a suíte tanto em `sqlite:///:memory:` quanto em um container de serviço `postgres:16-alpine`.
 
 ---
 
