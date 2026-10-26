@@ -147,8 +147,9 @@ docker compose up -d
 # 4. Instale as dependências
 pip install -r requirements.txt
 
-# 5. Baixe e inicie o modelo LLM no Ollama
+# 5. Baixe e inicie os modelos de chat e de embeddings no Ollama
 ollama pull llama3.2
+ollama pull nomic-embed-text
 ollama serve
 ```
 
@@ -203,6 +204,14 @@ pytest tests/ -v
 ```
 
 Os roteiros de testes manuais e de aceitação estão documentados em [`docs/TEST_TEMPLATES.md`](docs/TEST_TEMPLATES.md). A cada *push* ou *Pull Request*, o workflow [`.github/workflows/tests.yml`](.github/workflows/tests.yml) executa automaticamente a suíte tanto em `sqlite:///:memory:` quanto em um container de serviço `postgres:16-alpine`.
+
+---
+
+## ⚖️ Decisões Arquiteturais e Limitações Conhecidas
+
+- **Simulação Multiusuário sem Autenticação:** O seletor de participante na barra lateral do Streamlit (`Alice`, `Bob`, `Charlie`) destina-se à demonstração acadêmica de fluxos colaborativos em grupo na disciplina *SSC0528 - Sistemas Colaborativos*. Não há camada de autenticação por senha/OAuth/JWT; a autoria selecionada é vinculada via chave estrangeira (`users.id`) nas tabelas `tasks` e `chat_messages`.
+- **Dimensionalidade Fixa no `pgvector` (768d):** A coluna `regulation_chunks.embedding` é tipada nativamente como `vector(768)` com índice **HNSW** (`vector_cosine_ops`), alinhada ao modelo padrão `nomic-embed-text` (768 dimensões). Caso `OLLAMA_EMBEDDING_MODEL` seja alterado, o modelo escolhido deve produzir vetores de 768 dimensões. Em ambientes de teste/CI sem Ollama ativo, o sistema utiliza automaticamente um fallback determinístico de n-gramas de 768 dimensões.
+- **Migrações Versionadas (Alembic):** Toda criação e evolução de schema ocorre via `run_migrations("head")` (`migrations/versions/`). Caso um banco legado sem tabela `alembic_version` seja detectado, o sistema aplica `alembic stamp` preservando os dados existentes.
 
 ---
 

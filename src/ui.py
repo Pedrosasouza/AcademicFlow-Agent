@@ -8,6 +8,7 @@ from httpx import ConnectError
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from sqlalchemy.exc import OperationalError
 import streamlit as st
+from streamlit.runtime.scriptrunner import get_script_run_ctx
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -302,7 +303,6 @@ def render_app() -> None:
                     user_input=user_prompt,
                     session_id=active_session,
                     author=sender,
-                    on_step=react_agent.print_step,
                 )
             except ConnectError:
                 st.error(
@@ -317,9 +317,6 @@ def render_app() -> None:
 
             _sync_session_state_from_db(usuarios, session_id=active_session)
             st.rerun()
-
-
-from streamlit.runtime.scriptrunner import get_script_run_ctx
 
 
 if __name__ == "__main__" or get_script_run_ctx() is not None:
