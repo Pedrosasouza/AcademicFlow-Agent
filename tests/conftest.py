@@ -20,11 +20,13 @@ def clean_project_board(monkeypatch):
     from src import agent, database, repository
 
     agent.set_active_session("default") if hasattr(agent, "set_active_session") else None
+    agent.set_active_user(None) if hasattr(agent, "set_active_user") else None
     database.reset_engine()
     database.init_db()
     repository.clear_project_board()
     yield
     agent.set_active_session("default") if hasattr(agent, "set_active_session") else None
+    agent.set_active_user(None) if hasattr(agent, "set_active_user") else None
     try:
         repository.clear_project_board()
     except Exception:

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from contextvars import ContextVar
+import logging
 import os
 from typing import Any
 
@@ -31,12 +32,16 @@ from src.models import TaskStatus
 
 load_dotenv()
 
+logger = logging.getLogger(__name__)
+
 
 # =============================================================================
-# 1. CONTEXTO DE SESSAO
+# 1. CONTEXTO DE SESSAO E PARTICIPANTE ATIVO
 # =============================================================================
 
 _active_session_var: ContextVar[str] = ContextVar("active_session_id", default="default")
+_active_user_var: ContextVar[str | None] = ContextVar("active_user", default=None)
+_SELF_REFERENCES: frozenset[str] = frozenset({"eu", "mim", "me", "meu", "minha"})
 
 
 def get_active_session() -> str:
@@ -48,6 +53,17 @@ def set_active_session(session_id: str) -> None:
     """Define o identificador da sessao/evento ativo para as ferramentas e leituras do quadro."""
     cleaned = (session_id or "").strip() or "default"
     _active_session_var.set(cleaned)
+
+
+def get_active_user() -> str | None:
+    """Retorna o nome do participante ativo no turno de conversa atual."""
+    return _active_user_var.get()
+
+
+def set_active_user(user: str | None) -> None:
+    """Define o participante ativo no contexto para atribuicao automatica nas ferramentas."""
+    cleaned = (user or "").strip() or None
+    _active_user_var.set(cleaned)
 
 
 def get_users() -> list[str]:
@@ -70,14 +86,21 @@ def register_task(
 
     Use this when a participant asks to create, add, assign, or remember a task.
     """
+    cleaned_owner = (owner or "").strip()
+    if not cleaned_owner or cleaned_owner.lower() in _SELF_REFERENCES:
+        resolved_owner = get_active_user()
+    else:
+        resolved_owner = cleaned_owner
+
     try:
         task = repository.create_task(
             title=title,
-            owner=owner,
+            owner=resolved_owner,
             deadline=deadline,
             session_id=get_active_session(),
         )
     except ValueError as exc:
+        logger.warning("Erro de validacao em register_task: %s", exc)
         return f"Erro de validacao ao criar tarefa: {exc}"
 
     return (
@@ -270,13 +293,6 @@ def _format_messages_for_llm(messages: list[BaseMessage]) -> list[BaseMessage]:
     return formatted
 
 
-def agent(state: MessagesState) -> MessagesState:
-    """Invoca o LLM com o prompt do sistema e o historico formatado."""
-    messages = _format_messages_for_llm(state["messages"])
-    response = llm.invoke(messages)
-    return {"messages": [response]}
-
-
 def build_agent(custom_llm: Any = None) -> Any:
     """Constroi e compila o StateGraph ReAct de forma isolada."""
     def _agent_node(state: MessagesState) -> MessagesState:
@@ -311,9 +327,10 @@ def run_turn(
     compiled_agent: Any = None,
 ) -> list[BaseMessage]:
     """Executa um turno completo de conversa (contexto -> grafo ReAct -> persistencia no banco)."""
-    set_active_session(session_id)
-    context_history = repository.load_context_messages(session_id=session_id)
     cleaned_author = (author or "").strip() or None
+    set_active_session(session_id)
+    set_active_user(cleaned_author)
+    context_history = repository.load_context_messages(session_id=session_id)
     user_message = (
         HumanMessage(content=user_input, name=cleaned_author)
         if cleaned_author

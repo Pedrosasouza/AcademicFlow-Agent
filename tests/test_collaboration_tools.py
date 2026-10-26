@@ -60,6 +60,21 @@ def test_register_task_uses_default_owner_and_deadline():
     assert task["deadline"] == "a definir"
 
 
+def test_register_task_infers_active_user_from_context_when_owner_omitted_or_self():
+    """Garante que register_task atribui a tarefa ao usuario ativo na ContextVar se owner nao for informado ou for 'eu'."""
+    agent.set_active_user("Charlie")
+
+    agent.register_task.invoke({"title": "Preparar slides de abertura"})
+    agent.register_task.invoke({"title": "Testar projetor", "owner": "eu"})
+
+    tasks = repository.get_project_board()["tasks"]
+    assert len(tasks) == 2
+    assert tasks[0]["owner"] == "Charlie"
+    assert tasks[0]["owner_id"] is not None
+    assert tasks[1]["owner"] == "Charlie"
+    assert tasks[1]["owner_id"] is not None
+
+
 def test_update_task_modifies_existing_task_fields():
     agent.register_task.invoke(
         {
