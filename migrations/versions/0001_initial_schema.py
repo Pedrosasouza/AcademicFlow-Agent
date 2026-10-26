@@ -12,6 +12,8 @@ from collections.abc import Sequence
 from alembic import op
 import sqlalchemy as sa
 
+from src.models import EMBEDDING_DIM, PgVectorType
+
 revision: str = "0001_initial_schema"
 down_revision: str | None = None
 branch_labels: str | Sequence[str] | None = None
@@ -19,7 +21,12 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    """Cria as 6 tabelas relacionais com indices e restricoes de unicidade."""
+    """Cria as 6 tabelas relacionais com indices, extensao pgvector e indice HNSW."""
+    bind = op.get_bind()
+    is_postgres = bind.dialect.name == "postgresql"
+    if is_postgres:
+        op.execute(sa.text("CREATE EXTENSION IF NOT EXISTS vector"))
+
     op.create_table(
         "users",
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
@@ -112,9 +119,7 @@ def upgrade() -> None:
         sa.Column("source", sa.String(length=150), nullable=False),
         sa.Column("title", sa.String(length=200), nullable=False),
         sa.Column("content", sa.Text(), nullable=False),
-        sa.Column("dimensions", sa.Integer(), nullable=False, server_default="16"),
-        sa.Column("embedding", sa.JSON(), nullable=False),
-        sa.Column("embedding_text", sa.Text(), nullable=False),
+        sa.Column("embedding", PgVectorType(EMBEDDING_DIM), nullable=False),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
@@ -129,17 +134,20 @@ def upgrade() -> None:
         ["source"],
         unique=False,
     )
-    op.create_index(
-        op.f("ix_regulation_chunks_dimensions"),
-        "regulation_chunks",
-        ["dimensions"],
-        unique=False,
-    )
+    if is_postgres:
+        op.execute(
+            sa.text(
+                "CREATE INDEX IF NOT EXISTS ix_regulation_chunks_embedding_hnsw "
+                "ON regulation_chunks USING hnsw (embedding vector_cosine_ops)"
+            )
+        )
 
 
 def downgrade() -> None:
     """Reverte a criacao de todas as tabelas na ordem inversa."""
-    op.drop_index(op.f("ix_regulation_chunks_dimensions"), table_name="regulation_chunks")
+    bind = op.get_bind()
+    if bind.dialect.name == "postgresql":
+        op.execute(sa.text("DROP INDEX IF EXISTS ix_regulation_chunks_embedding_hnsw"))
     op.drop_index(op.f("ix_regulation_chunks_source"), table_name="regulation_chunks")
     op.drop_table("regulation_chunks")
 

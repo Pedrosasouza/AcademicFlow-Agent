@@ -57,16 +57,16 @@ flowchart LR
 | Ferramentas | LangChain Tools | Gestão de tarefas, decisões e seções do documento colaborativo |
 | Interface | Streamlit & CLI | Interação multiusuário, visualização do quadro e badges de execução |
 
-### Esquema do Banco de Dados (`init_db`)
+### Esquema do Banco de Dados (`init_db` + Alembic)
 
-O esquema é criado programaticamente de forma idempotente na inicialização da aplicação via `Base.metadata.create_all(bind=engine)` em `src/database.py`, realizando também o *seed* inicial dos participantes padrão (`Alice`, `Bob`, `Charlie`):
+O esquema é gerenciado por migrações versionadas do **Alembic** (`run_migrations("head")`) como fonte única da verdade para o DDL na inicialização da aplicação (`init_db()` em `src/database.py`), realizando em seguida o *seed* idempotente dos participantes padrão (`Alice`, `Bob`, `Charlie`) e normas institucionais:
 
 - `users`: Participantes cadastrados (`id`, `name`, `created_at`).
 - `tasks`: Tarefas do planejamento isoladas por sala (`id`, `session_id`, `title`, `owner`, `deadline`, `status`, `created_at`).
 - `decisions`: Decisões tomadas e justificativas por sala (`id`, `session_id`, `decision`, `reason`, `created_at`).
 - `document_sections`: Seções do plano com unicidade composta `(session_id, section)` (`id`, `session_id`, `section`, `text`, `updated_at`).
 - `chat_messages`: Histórico de mensagens (`id`, `session_id`, `role`, `content`, `tool_calls` em JSON, `tool_call_id`, `created_at`).
-- `regulation_chunks`: Base vetorial de editais e normas institucionais (`id`, `source`, `title`, `content`, `dimensions`, `embedding`, `embedding_text`, `created_at`) com busca semântica via operador `<=>` do `pgvector`.
+- `regulation_chunks`: Base vetorial de editais e normas institucionais (`id`, `source`, `title`, `content`, `embedding`, `created_at`) com coluna nativa `vector(768)` e índice **HNSW** (`vector_cosine_ops`) no PostgreSQL (`pgvector`), gerando embeddings via `OllamaEmbeddings`.
 
 ---
 
@@ -157,7 +157,8 @@ ollama serve
 | Variável | Valor Padrão | Descrição |
 |:---------|:-------------|:----------|
 | `DATABASE_URL` | `postgresql+psycopg://postgres:postgres@localhost:5432/academic_flow` | String de conexão SQLAlchemy 2.0 |
-| `OLLAMA_MODEL` | `llama3.2` | Modelo utilizado no Ollama |
+| `OLLAMA_MODEL` | `llama3.2` | Modelo conversacional utilizado no Ollama |
+| `OLLAMA_EMBEDDING_MODEL` | `nomic-embed-text` | Modelo de embeddings densos utilizado no RAG |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Endpoint da API local do Ollama |
 
 ### Execução Rápida com Docker Compose (Banco + Interface Web)

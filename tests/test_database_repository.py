@@ -17,6 +17,7 @@ def test_init_db_creates_all_tables_and_seeds_default_users(monkeypatch):
     inspector = inspect(database.get_engine())
     tables = set(inspector.get_table_names())
     assert {
+        "alembic_version",
         "users",
         "tasks",
         "decisions",
@@ -277,7 +278,6 @@ def test_clear_project_board_executes_truncate_restart_identity_on_postgresql(mo
     def fake_session():
         yield mock_session
 
-    monkeypatch.setattr(repository, "init_db", lambda: None)
     monkeypatch.setattr(repository, "get_engine", lambda: mock_engine)
     monkeypatch.setattr(repository, "get_db_session", fake_session)
 
@@ -374,7 +374,7 @@ def test_repository_index_and_vector_search_regulation_chunks():
 
 
 def test_repository_executes_pgvector_cosine_operator_on_postgresql(monkeypatch):
-    """Garante que no PostgreSQL com pgvector ativo a busca usa o operador nativo <=>."""
+    """Garante que no PostgreSQL com pgvector ativo a busca usa a coluna nativa vector(N) com <=> sem CAST na coluna."""
     from unittest.mock import MagicMock
 
     mock_engine = MagicMock()
@@ -394,7 +394,6 @@ def test_repository_executes_pgvector_cosine_operator_on_postgresql(monkeypatch)
     def fake_session():
         yield mock_session
 
-    monkeypatch.setattr(repository, "init_db", lambda: None)
     monkeypatch.setattr(repository, "get_engine", lambda: mock_engine)
     monkeypatch.setattr(repository, "get_db_session", fake_session)
     monkeypatch.setattr(database, "is_pgvector_enabled", lambda: True)
@@ -408,8 +407,48 @@ def test_repository_executes_pgvector_cosine_operator_on_postgresql(monkeypatch)
     assert len(results) == 1
     assert results[0]["title"] == "Norma de Teste"
     executed_sql = str(mock_session.execute.call_args[0][0])
-    assert "<=>" in executed_sql
-    assert "vector" in executed_sql
+    assert "embedding <=>" in executed_sql
+    assert "embedding_text" not in executed_sql
+
+
+def test_repository_operations_do_not_invoke_init_db(monkeypatch):
+    """Garante que operacoes CRUD do repositorio nao reexecutam init_db() a cada chamada."""
+    calls: list[int] = []
+    monkeypatch.setattr(database, "init_db", lambda: calls.append(1))
+
+    repository.create_task("Testar ciclo de vida", owner="Alice")
+    repository.list_tasks()
+    repository.get_project_board()
+    repository.search_regulation_chunks("auditorio")
+
+    assert calls == []
+
+
+def test_compute_embedding_uses_ollama_and_supports_arbitrary_vocabulary(monkeypatch):
+    """Garante que compute_embedding invoca OllamaEmbeddings em modo padrao e recupera termos como patrocinio."""
+    from unittest.mock import MagicMock
+
+    fake_embedder = MagicMock()
+    fake_embedder.embed_query.return_value = [1.0, 0.5, 0.0]
+
+    monkeypatch.setenv("EMBEDDING_PROVIDER", "ollama")
+    monkeypatch.setattr(database, "OllamaEmbeddings", lambda **kwargs: fake_embedder)
+
+    vec = database.compute_embedding("regras de patrocinio corporativo")
+    assert fake_embedder.embed_query.called
+    assert len(vec) == models.EMBEDDING_DIM
+
+    # Em modo offline/trigram, consultas para termos novos (ex.: patrocinio) devem funcionar sem dicionario fixo
+    monkeypatch.setenv("EMBEDDING_PROVIDER", "trigram")
+    repository.index_regulation_chunk(
+        source="Norma de Parcerias USP",
+        title="Diretrizes de Patrocinio e Apoio Financeiro",
+        content="Contratos de patrocinio com empresas exigem aprovacao juridica e contrapartida institucional.",
+    )
+    matches = repository.search_regulation_chunks("como funciona o patrocinio de empresas?", top_k=1)
+    assert len(matches) == 1
+    assert "Patrocinio" in matches[0]["title"]
+    assert matches[0]["score"] > 0.3
 
 
 def test_alembic_migrations_upgrade_and_downgrade_cleanly(monkeypatch, tmp_path):

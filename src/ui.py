@@ -201,6 +201,13 @@ def _render_chat_history() -> None:
             st.markdown(message.content)
 
 
+@st.cache_resource
+def _initialize_backend() -> bool:
+    """Inicializa o schema e seed do banco uma unica vez no ciclo de vida do servidor Streamlit."""
+    init_db()
+    return True
+
+
 def _sync_session_state_from_db(
     usuarios: list[str],
     session_id: str = "default",
@@ -252,7 +259,7 @@ def render_app() -> None:
     st.markdown("---")
 
     try:
-        init_db()
+        _initialize_backend()
         usuarios = react_agent.get_users()
         active_session = _render_event_chooser()
         _sync_session_state_from_db(usuarios, session_id=active_session)

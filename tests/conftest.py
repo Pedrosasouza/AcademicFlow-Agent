@@ -15,6 +15,7 @@ def clean_project_board(monkeypatch):
     """Isola cada teste em um banco limpo (SQLite in-memory por padrao ou TEST_DATABASE_URL)."""
     test_db_url = os.getenv("TEST_DATABASE_URL", "sqlite:///:memory:")
     monkeypatch.setenv("DATABASE_URL", test_db_url)
+    monkeypatch.setenv("EMBEDDING_PROVIDER", "trigram")
 
     from src import agent, database, repository
 
@@ -24,5 +25,8 @@ def clean_project_board(monkeypatch):
     repository.clear_project_board()
     yield
     agent.set_active_session("default") if hasattr(agent, "set_active_session") else None
-    repository.clear_project_board()
+    try:
+        repository.clear_project_board()
+    except Exception:
+        pass
     database.reset_engine()

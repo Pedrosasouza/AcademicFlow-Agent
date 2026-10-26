@@ -8,7 +8,65 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import DateTime, Integer, JSON, String, Text, UniqueConstraint, func
+from sqlalchemy.engine import Dialect
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.types import TypeDecorator, TypeEngine, UserDefinedType
+
+EMBEDDING_DIM = 768
+
+
+class _PgVectorCol(UserDefinedType[list[float]]):
+    """Tipo DDL nativo vector(N) para o PostgreSQL com a extensao pgvector."""
+
+    cache_ok = True
+
+    def __init__(self, dimensions: int = EMBEDDING_DIM) -> None:
+        self.dimensions = dimensions
+
+    def get_col_spec(self, **kw: Any) -> str:
+        return f"vector({self.dimensions})"
+
+
+class PgVectorType(TypeDecorator[list[float]]):
+    """Tipo hibrido que usa vector(N) nativo no PostgreSQL e JSON em outros dialetos (SQLite)."""
+
+    impl = JSON
+    cache_ok = True
+
+    def __init__(self, dimensions: int = EMBEDDING_DIM) -> None:
+        super().__init__()
+        self.dimensions = dimensions
+
+    def load_dialect_impl(self, dialect: Dialect) -> TypeEngine[Any]:
+        if dialect.name == "postgresql":
+            return dialect.type_descriptor(_PgVectorCol(self.dimensions))
+        return dialect.type_descriptor(JSON())
+
+    def process_bind_param(
+        self,
+        value: list[float] | None,
+        dialect: Dialect,
+    ) -> Any:
+        if value is None:
+            return None
+        vec = [float(x) for x in value]
+        if dialect.name == "postgresql":
+            return "[" + ",".join(f"{x:.6f}" for x in vec) + "]"
+        return vec
+
+    def process_result_value(
+        self,
+        value: Any,
+        dialect: Dialect,
+    ) -> list[float] | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            cleaned = value.strip().strip("[]")
+            if not cleaned:
+                return []
+            return [float(x) for x in cleaned.split(",")]
+        return [float(x) for x in value]
 
 
 class Base(DeclarativeBase):
@@ -101,9 +159,9 @@ class RegulationChunkModel(Base):
     source: Mapped[str] = mapped_column(String(150), index=True, nullable=False)
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    dimensions: Mapped[int] = mapped_column(Integer, default=16, index=True, nullable=False)
-    embedding: Mapped[list[float]] = mapped_column(JSON, nullable=False)
-    embedding_text: Mapped[str] = mapped_column(Text, nullable=False)
+    embedding: Mapped[list[float]] = mapped_column(
+        PgVectorType(EMBEDDING_DIM), nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

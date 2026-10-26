@@ -1,22 +1,27 @@
 """
-Configuracao de conexao, gerenciamento de sessoes e inicializacao do banco de dados.
+Configuracao de conexao, gerenciamento de sessoes, migracoes Alembic e embeddings do banco de dados.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 import hashlib
 import math
 import os
+from pathlib import Path
 import re
+import unicodedata
 
+from alembic import command
+from alembic.config import Config
 from dotenv import load_dotenv
+from langchain_ollama import OllamaEmbeddings
 from sqlalchemy import Engine, create_engine, inspect, select, text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from src.models import Base, RegulationChunkModel, UserModel
+from src.models import Base, EMBEDDING_DIM, RegulationChunkModel, UserModel
 
 load_dotenv()
 
@@ -48,42 +53,19 @@ DEFAULT_REGULATIONS: tuple[tuple[str, str, str], ...] = (
     ),
 )
 
-_DOMAIN_CONCEPTS: tuple[tuple[str, ...], ...] = (
-    ("auditorio", "reserva", "sala", "espaco", "antecedencia", "30", "local", "capacidade"),
-    ("coffee", "break", "alimentacao", "orcamento", "verba", "nota", "fiscal", "prestacao", "contas", "custo"),
-    ("certificado", "certificados", "frequencia", "presenca", "75", "carga", "horaria", "apolo", "ouvinte"),
-    ("artigo", "artigos", "submissao", "trabalho", "trabalhos", "comite", "cientifico", "avaliacao", "resumo"),
-    ("palestrante", "convite", "transporte", "diaria", "hospedagem", "passagem", "externo", "docente"),
-    ("inscricao", "inscricoes", "taxa", "gratuita", "vagas", "credenciamento", "formulario", "participante"),
-    ("patrocinio", "apoio", "empresa", "parceria", "divulgacao", "marca", "banner", "contrato"),
-    ("seguranca", "portaria", "acesso", "horario", "noturno", "autorizacao", "vigilancia", "identificacao"),
-)
-
 _engine: Engine | None = None
 _session_factory: sessionmaker[Session] | None = None
 _pgvector_enabled: bool = False
 
 
-def compute_deterministic_embedding(
-    text_content: str,
-    dimensions: int = 16,
+def fit_embedding_dimensions(
+    embedding: Sequence[float],
+    dimensions: int = EMBEDDING_DIM,
 ) -> list[float]:
-    """Gera um vetor de embedding normalizado (L2) combinando conceitos de dominio e hashing lexical."""
-    tokens = re.findall(r"[a-z0-9]+", (text_content or "").lower())
+    """Ajusta qualquer vetor para a dimensao fixa do banco e aplica normalizacao L2."""
     vec = [0.0] * dimensions
-
-    for idx, keywords in enumerate(_DOMAIN_CONCEPTS):
-        if idx >= dimensions:
-            break
-        for token in tokens:
-            if any(token.startswith(kw) or kw.startswith(token) for kw in keywords if len(token) >= 3):
-                vec[idx] += 2.0
-
-    for token in tokens:
-        digest = hashlib.sha256(token.encode("utf-8")).digest()
-        bucket = len(_DOMAIN_CONCEPTS) + (digest[0] % max(1, dimensions - len(_DOMAIN_CONCEPTS)))
-        if bucket < dimensions:
-            vec[bucket] += 1.0
+    for idx, val in enumerate(embedding):
+        vec[idx % dimensions] += float(val)
 
     norm = math.sqrt(sum(v * v for v in vec))
     if norm == 0.0:
@@ -92,8 +74,73 @@ def compute_deterministic_embedding(
     return [round(v / norm, 6) for v in vec]
 
 
-def format_vector_literal(embedding: list[float]) -> str:
-    """Formata uma lista de floats na sintaxe literal '[v1,v2,...]' exigida pelo tipo vector do pgvector."""
+def _normalize_text(text_content: str) -> str:
+    """Remove acentos e normaliza o texto para minusculas."""
+    normalized = unicodedata.normalize("NFKD", text_content or "")
+    ascii_text = normalized.encode("ascii", "ignore").decode("ascii")
+    return ascii_text.lower()
+
+
+def compute_trigram_embedding(
+    text_content: str,
+    dimensions: int = EMBEDDING_DIM,
+) -> list[float]:
+    """Fallback offline (para testes/CI sem Ollama) via projecao aleatoria de n-gramas."""
+    cleaned = _normalize_text(text_content)
+    tokens = re.findall(r"[a-z0-9]+", cleaned)
+    vec = [0.0] * dimensions
+
+    features: list[tuple[str, float]] = []
+    for token in tokens:
+        features.append((f"w:{token}", 2.0))
+        if len(token) >= 4:
+            features.append((f"p:{token[:4]}", 1.5))
+        if len(token) >= 3:
+            padded = f"^{token}$"
+            for i in range(len(padded) - 2):
+                features.append((f"g:{padded[i : i + 3]}", 1.0))
+
+    for feat, weight in features:
+        digest = hashlib.sha256(feat.encode("utf-8")).digest()
+        bucket = int.from_bytes(digest[:4], "little") % dimensions
+        sign = 1.0 if (digest[4] & 1) == 0 else -1.0
+        vec[bucket] += sign * weight
+
+    return fit_embedding_dimensions(vec, dimensions=dimensions)
+
+
+def compute_ollama_embedding(
+    text_content: str,
+    dimensions: int = EMBEDDING_DIM,
+) -> list[float]:
+    """Gera embedding denso real via OllamaEmbeddings e ajusta para a dimensao da coluna vector."""
+    model_name = os.getenv(
+        "OLLAMA_EMBEDDING_MODEL",
+        os.getenv("OLLAMA_MODEL", "nomic-embed-text"),
+    )
+    base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    embedder = OllamaEmbeddings(model=model_name, base_url=base_url)
+    raw_vector = embedder.embed_query(text_content or "")
+    return fit_embedding_dimensions(raw_vector, dimensions=dimensions)
+
+
+def compute_embedding(
+    text_content: str,
+    dimensions: int = EMBEDDING_DIM,
+) -> list[float]:
+    """Gera o vetor de embedding usando Ollama em producao ou fallback de n-gramas quando offline."""
+    provider = os.getenv("EMBEDDING_PROVIDER", "ollama").strip().lower()
+    if provider in {"trigram", "offline", "deterministic"}:
+        return compute_trigram_embedding(text_content, dimensions=dimensions)
+
+    try:
+        return compute_ollama_embedding(text_content, dimensions=dimensions)
+    except Exception:
+        return compute_trigram_embedding(text_content, dimensions=dimensions)
+
+
+def format_vector_literal(embedding: Sequence[float]) -> str:
+    """Formata uma sequencia de floats na sintaxe literal '[v1,v2,...]' exigida pelo pgvector."""
     return "[" + ",".join(f"{float(x):.6f}" for x in embedding) + "]"
 
 
@@ -165,26 +212,6 @@ def get_db_session() -> Iterator[Session]:
         session.close()
 
 
-def _ensure_multi_session_columns(engine: Engine) -> None:
-    """Garante compatibilidade em bancos locais criados antes da adicao de session_id."""
-    inspector = inspect(engine)
-    existing_tables = set(inspector.get_table_names())
-    target_tables = ("tasks", "decisions", "document_sections")
-
-    with engine.begin() as conn:
-        for table_name in target_tables:
-            if table_name not in existing_tables:
-                continue
-            cols = {col["name"] for col in inspector.get_columns(table_name)}
-            if "session_id" not in cols:
-                conn.execute(
-                    text(
-                        f"ALTER TABLE {table_name} "
-                        "ADD COLUMN session_id VARCHAR(100) NOT NULL DEFAULT 'default'"
-                    )
-                )
-
-
 def _enable_pgvector_if_available(engine: Engine) -> None:
     """Ativa a extensao vector no PostgreSQL quando disponivel (imagem pgvector/pgvector:pg16)."""
     global _pgvector_enabled
@@ -201,18 +228,20 @@ def _enable_pgvector_if_available(engine: Engine) -> None:
 
 
 def run_migrations(revision: str = "head") -> None:
-    """Executa migracoes versionadas do Alembic (upgrade para revision ou downgrade para 'base')."""
-    from pathlib import Path
-    from alembic import command
-    from alembic.config import Config
-
+    """Executa migracoes versionadas do Alembic como fonte unica da verdade para o DDL."""
     project_root = Path(__file__).resolve().parents[1]
     alembic_cfg = Config(str(project_root / "alembic.ini"))
     alembic_cfg.set_main_option("script_location", str(project_root / "migrations"))
     alembic_cfg.set_main_option("sqlalchemy.url", get_database_url())
+    alembic_cfg.attributes["configure_logger"] = False
 
     engine = get_engine()
     with engine.begin() as conn:
+        if revision != "base":
+            existing_tables = set(inspect(conn).get_table_names())
+            if "users" in existing_tables and "alembic_version" not in existing_tables:
+                Base.metadata.drop_all(bind=conn)
+
         alembic_cfg.attributes["connection"] = conn
         if revision == "base":
             command.downgrade(alembic_cfg, "base")
@@ -220,13 +249,8 @@ def run_migrations(revision: str = "head") -> None:
             command.upgrade(alembic_cfg, revision)
 
 
-def init_db() -> None:
-    """Cria as tabelas de forma idempotente, ativa pgvector e popula usuarios e editais iniciais."""
-    engine = get_engine()
-    _enable_pgvector_if_available(engine)
-    Base.metadata.create_all(bind=engine)
-    _ensure_multi_session_columns(engine)
-
+def _seed_initial_data() -> None:
+    """Popula de forma idempotente os participantes e normas institucionais iniciais."""
     with get_db_session() as session:
         existing_names = set(session.scalars(select(UserModel.name)).all())
         for name in DEFAULT_USERS:
@@ -236,14 +260,20 @@ def init_db() -> None:
         existing_titles = set(session.scalars(select(RegulationChunkModel.title)).all())
         for source, title, content in DEFAULT_REGULATIONS:
             if title not in existing_titles:
-                vec = compute_deterministic_embedding(f"{title} {content}")
+                vec = compute_embedding(f"{title} {content}")
                 session.add(
                     RegulationChunkModel(
                         source=source,
                         title=title,
                         content=content,
-                        dimensions=len(vec),
                         embedding=vec,
-                        embedding_text=format_vector_literal(vec),
                     )
                 )
+
+
+def init_db() -> None:
+    """Inicializa o banco aplicando as migracoes do Alembic (DDL) e o seed inicial (DML)."""
+    engine = get_engine()
+    _enable_pgvector_if_available(engine)
+    run_migrations("head")
+    _seed_initial_data()

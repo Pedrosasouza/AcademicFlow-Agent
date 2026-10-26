@@ -15,11 +15,11 @@ from sqlalchemy.orm import Session
 
 from src import database
 from src.database import (
-    compute_deterministic_embedding,
+    compute_embedding as _db_compute_embedding,
+    fit_embedding_dimensions,
     format_vector_literal,
     get_db_session,
     get_engine,
-    init_db,
 )
 from src.models import (
     ChatMessageModel,
@@ -87,26 +87,27 @@ def _cosine_similarity(vec_a: Sequence[float], vec_b: Sequence[float]) -> float:
 
 def compute_embedding(text_content: str) -> list[float]:
     """Gera o vetor de embedding para indexacao e busca semantica nas normas da universidade."""
-    return compute_deterministic_embedding(text_content)
+    return _db_compute_embedding(text_content)
 
 
 def index_regulation_chunk(
     source: str,
     title: str,
     content: str,
-    embedding: list[float] | None = None,
+    embedding: Sequence[float] | None = None,
 ) -> dict[str, Any]:
-    """Indexa um trecho de edital ou regulamento da universidade com seu vetor de embedding."""
-    init_db()
-    vec = list(embedding) if embedding is not None else compute_embedding(f"{title} {content}")
+    """Indexa um trecho de edital ou regulamento da universidade na coluna vetorial."""
+    vec = (
+        fit_embedding_dimensions(embedding)
+        if embedding is not None
+        else compute_embedding(f"{title} {content}")
+    )
     with get_db_session() as session:
         chunk = RegulationChunkModel(
             source=source.strip() or "Norma Institucional",
             title=title.strip() or "Trecho sem titulo",
             content=content.strip(),
-            dimensions=len(vec),
             embedding=vec,
-            embedding_text=format_vector_literal(vec),
         )
         session.add(chunk)
         session.flush()
@@ -115,13 +116,12 @@ def index_regulation_chunk(
             "source": chunk.source,
             "title": chunk.title,
             "content": chunk.content,
-            "dimensions": chunk.dimensions,
+            "dimensions": len(vec),
         }
 
 
 def list_regulation_chunks() -> list[dict[str, Any]]:
     """Lista todos os trechos de editais e regulamentos cadastrados na base vetorial."""
-    init_db()
     with get_db_session() as session:
         rows = session.scalars(
             select(RegulationChunkModel).order_by(RegulationChunkModel.id)
@@ -139,30 +139,30 @@ def list_regulation_chunks() -> list[dict[str, Any]]:
 
 def search_regulation_chunks(
     query: str,
-    query_embedding: list[float] | None = None,
+    query_embedding: Sequence[float] | None = None,
     top_k: int = 3,
 ) -> list[dict[str, Any]]:
-    """Busca os trechos de editais mais relevantes usando operador <=> do pgvector ou cosseno em memoria."""
-    init_db()
-    vec = list(query_embedding) if query_embedding is not None else compute_embedding(query)
-    dim = len(vec)
+    """Busca os trechos mais relevantes usando a coluna nativa vector(N) com indice HNSW no pgvector ou cosseno em memoria."""
+    vec = (
+        fit_embedding_dimensions(query_embedding)
+        if query_embedding is not None
+        else compute_embedding(query)
+    )
     engine = get_engine()
 
     with get_db_session() as session:
         if engine.dialect.name == "postgresql" and database.is_pgvector_enabled():
             stmt = text(
                 "SELECT id, source, title, content, "
-                "1.0 - (CAST(embedding_text AS vector) <=> CAST(:query_vec AS vector)) AS score "
+                "1.0 - (embedding <=> CAST(:query_vec AS vector)) AS score "
                 "FROM regulation_chunks "
-                "WHERE dimensions = :dim "
-                "ORDER BY CAST(embedding_text AS vector) <=> CAST(:query_vec AS vector) "
+                "ORDER BY embedding <=> CAST(:query_vec AS vector) "
                 "LIMIT :top_k"
             )
             rows = session.execute(
                 stmt,
                 {
                     "query_vec": format_vector_literal(vec),
-                    "dim": dim,
                     "top_k": top_k,
                 },
             ).all()
@@ -177,16 +177,14 @@ def search_regulation_chunks(
                 for row in rows
             ]
 
-        candidates = session.scalars(
-            select(RegulationChunkModel).where(RegulationChunkModel.dimensions == dim)
-        ).all()
+        candidates = session.scalars(select(RegulationChunkModel)).all()
         scored = [
             {
                 "id": item.id,
                 "source": item.source,
                 "title": item.title,
                 "content": item.content,
-                "score": _cosine_similarity(vec, item.embedding),
+                "score": _cosine_similarity(vec, fit_embedding_dimensions(item.embedding)),
             }
             for item in candidates
         ]
@@ -196,7 +194,6 @@ def search_regulation_chunks(
 
 def list_users() -> list[str]:
     """Retorna a lista ordenada de participantes disponiveis no projeto."""
-    init_db()
     with get_db_session() as session:
         names = session.scalars(select(UserModel.name).order_by(UserModel.id)).all()
         return list(names)
@@ -204,7 +201,6 @@ def list_users() -> list[str]:
 
 def list_sessions() -> list[str]:
     """Retorna a lista de identificadores de sessoes/eventos ativos no banco (incluindo 'default')."""
-    init_db()
     with get_db_session() as session:
         found: set[str] = {"default"}
         for model in (TaskModel, DecisionModel, DocumentSectionModel, ChatMessageModel):
@@ -222,7 +218,6 @@ def create_task(
     session_id: str = "default",
 ) -> dict[str, Any]:
     """Cria uma nova tarefa no banco para a sessao informada e retorna seus dados como dicionario."""
-    init_db()
     with get_db_session() as session:
         normalized_owner = _normalize_owner(session, owner)
         normalized_deadline = (deadline or "").strip() or "a definir"
@@ -248,7 +243,6 @@ def update_task_by_id(
     session_id: str = "default",
 ) -> dict[str, Any] | None:
     """Atualiza campos de uma tarefa existente na sessao pelo ID ou retorna None se nao encontrada."""
-    init_db()
     with get_db_session() as session:
         task = session.get(TaskModel, task_id)
         if task is None or task.session_id != session_id:
@@ -267,7 +261,6 @@ def update_task_by_id(
 
 def list_tasks(session_id: str = "default") -> list[dict[str, Any]]:
     """Lista todas as tarefas cadastradas na sessao ordenadas por ID."""
-    init_db()
     with get_db_session() as session:
         tasks = session.scalars(
             select(TaskModel)
@@ -283,7 +276,6 @@ def create_decision(
     session_id: str = "default",
 ) -> dict[str, Any]:
     """Registra uma nova decisao do grupo na sessao e retorna um dicionario."""
-    init_db()
     with get_db_session() as session:
         item = DecisionModel(
             session_id=session_id,
@@ -298,7 +290,6 @@ def create_decision(
 
 def list_decisions(session_id: str = "default") -> list[dict[str, Any]]:
     """Lista todas as decisoes registradas na sessao ordenadas por ID."""
-    init_db()
     with get_db_session() as session:
         decisions = session.scalars(
             select(DecisionModel)
@@ -314,7 +305,6 @@ def upsert_document_section(
     session_id: str = "default",
 ) -> dict[str, Any]:
     """Cria ou atualiza uma secao do documento colaborativo na sessao sem duplicar registros."""
-    init_db()
     now_str = _now()
     with get_db_session() as session:
         existing = session.scalar(
@@ -345,7 +335,6 @@ def upsert_document_section(
 
 def get_document_sections(session_id: str = "default") -> dict[str, dict[str, str]]:
     """Retorna todas as secoes do documento da sessao no formato {nome_secao: {'text': ..., 'updated_at': ...}}."""
-    init_db()
     with get_db_session() as session:
         rows = session.scalars(
             select(DocumentSectionModel)
@@ -378,7 +367,6 @@ def append_messages(
     if not messages:
         return
 
-    init_db()
     with get_db_session() as session:
         for msg in messages:
             if isinstance(msg, HumanMessage):
@@ -417,7 +405,6 @@ def append_messages(
 
 def load_messages(session_id: str = "default") -> list[BaseMessage]:
     """Carrega o historico completo de mensagens de uma sessao convertido para classes do LangChain."""
-    init_db()
     with get_db_session() as session:
         rows = session.scalars(
             select(ChatMessageModel)
@@ -463,7 +450,6 @@ def load_context_messages(
 
 def clear_project_board(session_id: str | None = None) -> None:
     """Remove tarefas, decisoes, secoes e mensagens (de uma sessao especifica ou de todo o banco)."""
-    init_db()
     engine = get_engine()
     with get_db_session() as session:
         if session_id is not None:
