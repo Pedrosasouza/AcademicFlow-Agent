@@ -158,8 +158,7 @@ def render_app() -> None:
     with col2:
         st.markdown(
             """
-        **Alunos:**
-        - Pedro Eduardo Moreira Chamone
+        **Aluno:**
         - Pedro Santos Souza
         """
         )
