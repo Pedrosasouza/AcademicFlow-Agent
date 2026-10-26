@@ -288,3 +288,60 @@ def test_clear_project_board_executes_truncate_restart_identity_on_postgresql(mo
     assert "RESTART IDENTITY CASCADE" in executed_clause
 
 
+def test_multi_session_isolation_across_tasks_decisions_sections_and_chat():
+    """Garante isolamento multi-tenant: dados e secoes de mesmo nome nao vazam nem colidem entre sessoes."""
+    t_a = repository.create_task("Reservar palco", owner="Alice", session_id="evento_a")
+    t_b = repository.create_task("Contratar som", owner="Bob", session_id="evento_b")
+
+    repository.create_decision("Entrada franca", reason="Acessibilidade", session_id="evento_a")
+    repository.create_decision("Inscricao paga", reason="Custear kit", session_id="evento_b")
+
+    # Ambas as sessoes criam uma secao com o mesmo titulo 'Cronograma' (valida UniqueConstraint composta)
+    repository.upsert_document_section("Cronograma", "Cronograma do Evento A", session_id="evento_a")
+    repository.upsert_document_section("Cronograma", "Cronograma do Evento B", session_id="evento_b")
+
+    repository.append_messages([HumanMessage(content="Mensagem da sala A")], session_id="evento_a")
+    repository.append_messages([HumanMessage(content="Mensagem da sala B")], session_id="evento_b")
+
+    # Tentar atualizar tarefa da sessao A a partir da sessao B deve retornar None (isolamento de escrita)
+    assert repository.update_task_by_id(t_a["id"], status="concluida", session_id="evento_b") is None
+    assert repository.update_task_by_id(t_b["id"], status="concluida", session_id="evento_b") is not None
+
+    board_a = repository.get_project_board(session_id="evento_a")
+    board_b = repository.get_project_board(session_id="evento_b")
+
+    assert len(board_a["tasks"]) == 1
+    assert board_a["tasks"][0]["title"] == "Reservar palco"
+    assert board_a["tasks"][0]["status"] == "pendente"
+    assert board_a["decisions"][0]["decision"] == "Entrada franca"
+    assert board_a["document_sections"]["Cronograma"]["text"] == "Cronograma do Evento A"
+
+    assert len(board_b["tasks"]) == 1
+    assert board_b["tasks"][0]["title"] == "Contratar som"
+    assert board_b["tasks"][0]["status"] == "concluida"
+    assert board_b["decisions"][0]["decision"] == "Inscricao paga"
+    assert board_b["document_sections"]["Cronograma"]["text"] == "Cronograma do Evento B"
+
+    msgs_a = repository.load_messages(session_id="evento_a")
+    msgs_b = repository.load_messages(session_id="evento_b")
+    assert [m.content for m in msgs_a] == ["Mensagem da sala A"]
+    assert [m.content for m in msgs_b] == ["Mensagem da sala B"]
+
+
+def test_list_sessions_and_selective_session_clear():
+    """Lista todas as sessoes ativas e limpa apenas a sessao especificada preservando as demais."""
+    repository.create_task("Tarefa Evento 1", session_id="semana_computacao")
+    repository.create_decision("Decisao Evento 2", session_id="simposio_ia")
+
+    sessions = repository.list_sessions()
+    assert "default" in sessions
+    assert "semana_computacao" in sessions
+    assert "simposio_ia" in sessions
+
+    repository.clear_project_board(session_id="semana_computacao")
+
+    assert repository.get_project_board(session_id="semana_computacao")["tasks"] == []
+    assert len(repository.get_project_board(session_id="simposio_ia")["decisions"]) == 1
+
+
+

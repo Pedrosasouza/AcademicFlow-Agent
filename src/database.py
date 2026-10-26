@@ -9,7 +9,7 @@ from contextlib import contextmanager
 import os
 
 from dotenv import load_dotenv
-from sqlalchemy import Engine, create_engine, select
+from sqlalchemy import Engine, create_engine, inspect, select, text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -88,10 +88,31 @@ def get_db_session() -> Iterator[Session]:
         session.close()
 
 
+def _ensure_multi_session_columns(engine: Engine) -> None:
+    """Garante compatibilidade em bancos locais criados antes da adicao de session_id."""
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+    target_tables = ("tasks", "decisions", "document_sections")
+
+    with engine.begin() as conn:
+        for table_name in target_tables:
+            if table_name not in existing_tables:
+                continue
+            cols = {col["name"] for col in inspector.get_columns(table_name)}
+            if "session_id" not in cols:
+                conn.execute(
+                    text(
+                        f"ALTER TABLE {table_name} "
+                        "ADD COLUMN session_id VARCHAR(100) NOT NULL DEFAULT 'default'"
+                    )
+                )
+
+
 def init_db() -> None:
     """Cria as tabelas de forma idempotente e insere os usuarios iniciais caso nao existam."""
     engine = get_engine()
     Base.metadata.create_all(bind=engine)
+    _ensure_multi_session_columns(engine)
 
     with get_db_session() as session:
         existing_names = set(session.scalars(select(UserModel.name)).all())

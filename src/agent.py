@@ -11,6 +11,7 @@ de dados via SQLAlchemy 2.0 (PostgreSQL em producao/local e SQLite em testes).
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 import os
 from typing import Any
 
@@ -30,16 +31,29 @@ load_dotenv()
 
 
 # =============================================================================
-# 1. ADAPTADOR DE LEITURA DO QUADRO DO PROJETO (FONTE UNICA NO BANCO)
+# 1. CONTEXTO DE SESSAO E ADAPTADOR DE LEITURA DO QUADRO DO PROJETO
 # =============================================================================
+
+_active_session_var: ContextVar[str] = ContextVar("active_session_id", default="default")
+
+
+def get_active_session() -> str:
+    """Retorna o identificador da sessao/evento ativo no contexto de execucao atual."""
+    return _active_session_var.get()
+
+
+def set_active_session(session_id: str) -> None:
+    """Define o identificador da sessao/evento ativo para as ferramentas e leituras do quadro."""
+    cleaned = (session_id or "").strip() or "default"
+    _active_session_var.set(cleaned)
 
 
 class ProjectBoardView:
-    """Adaptador de leitura que consulta sempre o banco de dados como fonte unica da verdade."""
+    """Adaptador de leitura que consulta sempre o banco de dados na sessao ativa."""
 
     def to_dict(self) -> dict[str, Any]:
         """Retorna um snapshot atualizado do quadro do projeto a partir do repositorio."""
-        return repository.get_project_board()
+        return repository.get_project_board(session_id=get_active_session())
 
     def __getitem__(self, key: str) -> Any:
         return self.to_dict()[key]
@@ -78,7 +92,12 @@ def register_task(
 
     Use this when a participant asks to create, add, assign, or remember a task.
     """
-    task = repository.create_task(title=title, owner=owner, deadline=deadline)
+    task = repository.create_task(
+        title=title,
+        owner=owner,
+        deadline=deadline,
+        session_id=get_active_session(),
+    )
     return (
         f"Tarefa #{task['id']} registrada: {task['title']} | "
         f"responsavel: {task['owner']} | prazo: {task['deadline']}."
@@ -101,6 +120,7 @@ def update_task(
         status=status,
         owner=owner,
         deadline=deadline,
+        session_id=get_active_session(),
     )
     if updated is None:
         return f"Tarefa #{task_id} nao encontrada."
@@ -118,7 +138,11 @@ def register_decision(decision: str, reason: str = "") -> str:
 
     Use this when participants agree on something that should be preserved.
     """
-    item = repository.create_decision(decision=decision, reason=reason)
+    item = repository.create_decision(
+        decision=decision,
+        reason=reason,
+        session_id=get_active_session(),
+    )
     reason_text = f" Motivo: {item['reason']}" if item["reason"] else ""
     return f"Decisao #{item['id']} registrada: {item['decision']}.{reason_text}"
 
@@ -129,7 +153,11 @@ def update_document_section(section: str, text: str) -> str:
 
     Use this when the group asks to draft, rewrite, or save part of the event plan.
     """
-    repository.upsert_document_section(section=section, text_content=text)
+    repository.upsert_document_section(
+        section=section,
+        text_content=text,
+        session_id=get_active_session(),
+    )
     return f"Secao '{section}' atualizada com {len(text.split())} palavras."
 
 
@@ -139,7 +167,7 @@ def consult_project_board() -> str:
 
     Use this when participants ask for a summary, status, or current project board.
     """
-    board = repository.get_project_board()
+    board = repository.get_project_board(session_id=get_active_session())
     tasks = board["tasks"]
     decisions = board["decisions"]
     sections = board["document_sections"]
@@ -268,12 +296,14 @@ def main() -> None:
         print("Ou verifique a variavel DATABASE_URL no seu arquivo .env.\n")
         return
 
+    active_session = get_active_session()
+
     while True:
         user_input = input("Grupo: ")
         if user_input.strip().lower() in {"exit", "quit"}:
             break
 
-        context_history = repository.load_context_messages()
+        context_history = repository.load_context_messages(session_id=active_session)
         user_message = HumanMessage(content=user_input)
         pending_history = [*context_history, user_message]
         initial_count = len(context_history)
@@ -299,7 +329,7 @@ def main() -> None:
 
         if step is not None:
             new_messages = step["messages"][initial_count:]
-            repository.append_messages(new_messages)
+            repository.append_messages(new_messages, session_id=active_session)
         print()
 
 

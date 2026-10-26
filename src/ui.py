@@ -20,6 +20,13 @@ from src.database import init_db
 LOGO_PATH = PROJECT_ROOT / "assets" / "logo.png"
 
 
+def _get_current_session() -> str:
+    """Retorna o identificador da sala/evento selecionado na sessao do Streamlit."""
+    if "current_session" not in st.session_state or not st.session_state.current_session:
+        st.session_state.current_session = "default"
+    return str(st.session_state.current_session)
+
+
 def _message_role(message: BaseMessage) -> str | None:
     """Retorna o papel no chat ('user' ou 'assistant') apenas para mensagens exibiveis."""
     if isinstance(message, HumanMessage):
@@ -50,24 +57,70 @@ def _render_tools_called() -> None:
             st.badge(f"Ferramenta chamada: {tool_name}", color="orange")
 
 
-def _reset_session() -> None:
-    """Limpa tarefas, decisoes, secoes e historico de chat persistidos no banco de dados."""
-    repository.clear_project_board()
+def _reset_session(session_id: str | None = None) -> None:
+    """Limpa tarefas, decisoes, secoes e historico de chat da sessao/evento atual no banco."""
+    target_session = session_id or _get_current_session()
+    repository.clear_project_board(session_id=target_session)
     if "messages" in st.session_state:
         st.session_state.messages = []
     if "tools_called" in st.session_state:
         st.session_state.tools_called = set()
     if "project_board" in st.session_state:
-        st.session_state.project_board = repository.get_project_board()
+        st.session_state.project_board = repository.get_project_board(
+            session_id=target_session
+        )
 
 
-def _render_user_chooser(usuarios: list[str]) -> None:
+def _render_event_chooser() -> str:
+    """Renderiza na barra lateral o seletor de evento/sala e a criacao de novas salas."""
+    if "custom_sessions" not in st.session_state:
+        st.session_state.custom_sessions = set()
+
+    db_sessions = repository.list_sessions()
+    all_sessions = ["default"] + sorted(
+        (set(db_sessions) | set(st.session_state.custom_sessions)) - {"default"}
+    )
+
+    current = _get_current_session()
+    if current not in all_sessions:
+        all_sessions.append(current)
+
+    with st.sidebar:
+        st.markdown("### Evento / Sala")
+        selected = st.selectbox(
+            "Selecione o evento",
+            all_sessions,
+            index=all_sessions.index(current),
+        )
+        if selected != current:
+            st.session_state.current_session = selected
+            react_agent.set_active_session(selected)
+            st.rerun()
+
+        with st.expander("➕ Novo evento / sala"):
+            new_event = st.text_input(
+                "Identificador do evento",
+                placeholder="Ex: semana_computacao",
+            )
+            if st.button("Criar / Acessar sala"):
+                cleaned = new_event.strip()
+                if cleaned:
+                    st.session_state.custom_sessions.add(cleaned)
+                    st.session_state.current_session = cleaned
+                    react_agent.set_active_session(cleaned)
+                    st.rerun()
+
+    react_agent.set_active_session(selected)
+    return selected
+
+
+def _render_user_chooser(usuarios: list[str], session_id: str) -> None:
     """Renderiza o seletor de participante e o botao de limpeza na barra lateral."""
     with st.sidebar:
         user = st.selectbox("Selecione o usuário", usuarios)
         st.session_state.current_user = user
         if st.button("Limpar sessão"):
-            _reset_session()
+            _reset_session(session_id=session_id)
             st.rerun()
 
 
@@ -126,11 +179,15 @@ def _render_chat_history() -> None:
             st.markdown(message.content)
 
 
-def _sync_session_state_from_db(usuarios: list[str]) -> None:
-    """Sincroniza o session_state do Streamlit com os dados persistidos no banco relacional."""
-    messages = repository.load_messages()
+def _sync_session_state_from_db(
+    usuarios: list[str],
+    session_id: str = "default",
+) -> None:
+    """Sincroniza o session_state do Streamlit com os dados da sala/evento no banco relacional."""
+    react_agent.set_active_session(session_id)
+    messages = repository.load_messages(session_id=session_id)
     st.session_state.messages = messages
-    st.session_state.project_board = repository.get_project_board()
+    st.session_state.project_board = repository.get_project_board(session_id=session_id)
     st.session_state.tools_called = _extract_tools_called(messages)
     if "current_user" not in st.session_state and usuarios:
         st.session_state.current_user = usuarios[0]
@@ -175,7 +232,8 @@ def render_app() -> None:
     try:
         init_db()
         usuarios = react_agent.get_users()
-        _sync_session_state_from_db(usuarios)
+        active_session = _render_event_chooser()
+        _sync_session_state_from_db(usuarios, session_id=active_session)
     except OperationalError:
         st.error(
             "Não foi possível conectar ao banco de dados PostgreSQL. "
@@ -184,7 +242,7 @@ def render_app() -> None:
         )
         st.stop()
 
-    _render_user_chooser(usuarios)
+    _render_user_chooser(usuarios, session_id=active_session)
     _render_board_summary()
     _render_tools_called()
     _render_chat_history()
@@ -193,7 +251,7 @@ def render_app() -> None:
 
     if user_prompt:
         sender = st.session_state.get("current_user") or "Usuário Desconhecido"
-        context_messages = repository.load_context_messages()
+        context_messages = repository.load_context_messages(session_id=active_session)
         user_msg = HumanMessage(content=f"[user:{sender}] {user_prompt}")
         pending_messages = [*context_messages, user_msg]
         initial_count = len(context_messages)
@@ -201,6 +259,7 @@ def render_app() -> None:
         with st.spinner("Processando com o agente..."):
             final_step = None
             try:
+                react_agent.set_active_session(active_session)
                 for step in react_agent.react_event_agent.stream(
                     {"messages": pending_messages},
                     stream_mode="values",
@@ -222,8 +281,8 @@ def render_app() -> None:
 
             if final_step:
                 new_messages = final_step["messages"][initial_count:]
-                repository.append_messages(new_messages)
-            _sync_session_state_from_db(usuarios)
+                repository.append_messages(new_messages, session_id=active_session)
+            _sync_session_state_from_db(usuarios, session_id=active_session)
             st.rerun()
 
 

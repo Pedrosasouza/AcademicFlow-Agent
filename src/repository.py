@@ -72,18 +72,33 @@ def list_users() -> list[str]:
         return list(names)
 
 
+def list_sessions() -> list[str]:
+    """Retorna a lista de identificadores de sessoes/eventos ativos no banco (incluindo 'default')."""
+    init_db()
+    with get_db_session() as session:
+        found: set[str] = {"default"}
+        for model in (TaskModel, DecisionModel, DocumentSectionModel, ChatMessageModel):
+            values = session.scalars(select(model.session_id).distinct()).all()
+            found.update(v for v in values if v)
+
+        others = sorted(s for s in found if s != "default")
+        return ["default", *others]
+
+
 def create_task(
     title: str,
     owner: str | None = None,
     deadline: str | None = None,
+    session_id: str = "default",
 ) -> dict[str, Any]:
-    """Cria uma nova tarefa no banco e retorna seus dados como dicionario."""
+    """Cria uma nova tarefa no banco para a sessao informada e retorna seus dados como dicionario."""
     init_db()
     with get_db_session() as session:
         normalized_owner = _normalize_owner(session, owner)
         normalized_deadline = (deadline or "").strip() or "a definir"
 
         task = TaskModel(
+            session_id=session_id,
             title=title,
             owner=normalized_owner,
             deadline=normalized_deadline,
@@ -100,12 +115,13 @@ def update_task_by_id(
     status: str | None = None,
     owner: str | None = None,
     deadline: str | None = None,
+    session_id: str = "default",
 ) -> dict[str, Any] | None:
-    """Atualiza campos de uma tarefa existente pelo ID ou retorna None se nao encontrada."""
+    """Atualiza campos de uma tarefa existente na sessao pelo ID ou retorna None se nao encontrada."""
     init_db()
     with get_db_session() as session:
         task = session.get(TaskModel, task_id)
-        if task is None:
+        if task is None or task.session_id != session_id:
             return None
 
         if status:
@@ -119,19 +135,28 @@ def update_task_by_id(
         return _task_to_dict(task)
 
 
-def list_tasks() -> list[dict[str, Any]]:
-    """Lista todas as tarefas cadastradas ordenadas por ID."""
+def list_tasks(session_id: str = "default") -> list[dict[str, Any]]:
+    """Lista todas as tarefas cadastradas na sessao ordenadas por ID."""
     init_db()
     with get_db_session() as session:
-        tasks = session.scalars(select(TaskModel).order_by(TaskModel.id)).all()
+        tasks = session.scalars(
+            select(TaskModel)
+            .where(TaskModel.session_id == session_id)
+            .order_by(TaskModel.id)
+        ).all()
         return [_task_to_dict(task) for task in tasks]
 
 
-def create_decision(decision: str, reason: str = "") -> dict[str, Any]:
-    """Registra uma nova decisao do grupo no banco e retorna um dicionario."""
+def create_decision(
+    decision: str,
+    reason: str = "",
+    session_id: str = "default",
+) -> dict[str, Any]:
+    """Registra uma nova decisao do grupo na sessao e retorna um dicionario."""
     init_db()
     with get_db_session() as session:
         item = DecisionModel(
+            session_id=session_id,
             decision=decision,
             reason=reason or "",
             created_at=_now(),
@@ -141,26 +166,36 @@ def create_decision(decision: str, reason: str = "") -> dict[str, Any]:
         return _decision_to_dict(item)
 
 
-def list_decisions() -> list[dict[str, Any]]:
-    """Lista todas as decisoes registradas ordenadas por ID."""
+def list_decisions(session_id: str = "default") -> list[dict[str, Any]]:
+    """Lista todas as decisoes registradas na sessao ordenadas por ID."""
     init_db()
     with get_db_session() as session:
         decisions = session.scalars(
-            select(DecisionModel).order_by(DecisionModel.id)
+            select(DecisionModel)
+            .where(DecisionModel.session_id == session_id)
+            .order_by(DecisionModel.id)
         ).all()
         return [_decision_to_dict(item) for item in decisions]
 
 
-def upsert_document_section(section: str, text_content: str) -> dict[str, Any]:
-    """Cria ou atualiza uma secao do documento colaborativo sem duplicar registros."""
+def upsert_document_section(
+    section: str,
+    text_content: str,
+    session_id: str = "default",
+) -> dict[str, Any]:
+    """Cria ou atualiza uma secao do documento colaborativo na sessao sem duplicar registros."""
     init_db()
     now_str = _now()
     with get_db_session() as session:
         existing = session.scalar(
-            select(DocumentSectionModel).where(DocumentSectionModel.section == section)
+            select(DocumentSectionModel).where(
+                DocumentSectionModel.session_id == session_id,
+                DocumentSectionModel.section == section,
+            )
         )
         if existing is None:
             existing = DocumentSectionModel(
+                session_id=session_id,
                 section=section,
                 text=text_content,
                 updated_at=now_str,
@@ -178,12 +213,14 @@ def upsert_document_section(section: str, text_content: str) -> dict[str, Any]:
         }
 
 
-def get_document_sections() -> dict[str, dict[str, str]]:
-    """Retorna todas as secoes do documento no formato {nome_secao: {'text': ..., 'updated_at': ...}}."""
+def get_document_sections(session_id: str = "default") -> dict[str, dict[str, str]]:
+    """Retorna todas as secoes do documento da sessao no formato {nome_secao: {'text': ..., 'updated_at': ...}}."""
     init_db()
     with get_db_session() as session:
         rows = session.scalars(
-            select(DocumentSectionModel).order_by(DocumentSectionModel.id)
+            select(DocumentSectionModel)
+            .where(DocumentSectionModel.session_id == session_id)
+            .order_by(DocumentSectionModel.id)
         ).all()
         return {
             row.section: {
@@ -194,12 +231,12 @@ def get_document_sections() -> dict[str, dict[str, str]]:
         }
 
 
-def get_project_board() -> dict[str, Any]:
-    """Retorna o estado consolidado do quadro do projeto a partir do banco de dados."""
+def get_project_board(session_id: str = "default") -> dict[str, Any]:
+    """Retorna o estado consolidado do quadro do projeto para a sessao informada."""
     return {
-        "tasks": list_tasks(),
-        "decisions": list_decisions(),
-        "document_sections": get_document_sections(),
+        "tasks": list_tasks(session_id=session_id),
+        "decisions": list_decisions(session_id=session_id),
+        "document_sections": get_document_sections(session_id=session_id),
     }
 
 
@@ -294,12 +331,25 @@ def load_context_messages(
     return sliced
 
 
-def clear_project_board() -> None:
-    """Remove tarefas, decisoes, secoes e mensagens do chat, preservando os usuarios cadastrados."""
+def clear_project_board(session_id: str | None = None) -> None:
+    """Remove tarefas, decisoes, secoes e mensagens (de uma sessao especifica ou de todo o banco)."""
     init_db()
     engine = get_engine()
     with get_db_session() as session:
-        if engine.dialect.name == "postgresql":
+        if session_id is not None:
+            session.execute(delete(TaskModel).where(TaskModel.session_id == session_id))
+            session.execute(
+                delete(DecisionModel).where(DecisionModel.session_id == session_id)
+            )
+            session.execute(
+                delete(DocumentSectionModel).where(
+                    DocumentSectionModel.session_id == session_id
+                )
+            )
+            session.execute(
+                delete(ChatMessageModel).where(ChatMessageModel.session_id == session_id)
+            )
+        elif engine.dialect.name == "postgresql":
             session.execute(
                 text(
                     "TRUNCATE TABLE tasks, decisions, document_sections, chat_messages "

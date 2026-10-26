@@ -164,3 +164,25 @@ def test_consult_project_board_handles_empty_state():
     assert "- nenhuma tarefa registrada" in summary
     assert "- nenhuma decisao registrada" in summary
     assert "- nenhuma secao criada" in summary
+
+
+def test_agent_tools_respect_active_session_context():
+    """Garante que as ferramentas ReAct operam de forma isolada na sessao/evento ativo."""
+    agent.set_active_session("simposio_ia")
+    assert agent.get_active_session() == "simposio_ia"
+
+    agent.register_task.invoke({"title": "Convidar palestrante de IA", "owner": "Alice"})
+    agent.register_decision.invoke({"decision": "Foco em LLMs locais", "reason": "Privacidade"})
+    agent.update_document_section.invoke({"section": "Tema", "text": "Agentes autonomos ReAct"})
+
+    assert len(agent.project_board["tasks"]) == 1
+    assert agent.project_board["tasks"][0]["title"] == "Convidar palestrante de IA"
+    assert "Convidar palestrante de IA" in agent.consult_project_board.invoke({})
+
+    # Ao voltar para a sessao 'default', o quadro deve estar completamente vazio
+    agent.set_active_session("default")
+    assert agent.project_board["tasks"] == []
+    assert agent.project_board["decisions"] == []
+    assert agent.project_board["document_sections"] == {}
+    assert "- nenhuma tarefa registrada" in agent.consult_project_board.invoke({})
+

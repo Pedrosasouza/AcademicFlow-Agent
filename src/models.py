@@ -7,7 +7,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, Integer, JSON, String, Text, func
+from sqlalchemy import DateTime, Integer, JSON, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -33,6 +33,9 @@ class TaskModel(Base):
     __tablename__ = "tasks"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(
+        String(100), default="default", index=True, nullable=False
+    )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     owner: Mapped[str] = mapped_column(String(100), default="a definir", nullable=False)
     deadline: Mapped[str] = mapped_column(String(100), default="a definir", nullable=False)
@@ -46,6 +49,9 @@ class DecisionModel(Base):
     __tablename__ = "decisions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(
+        String(100), default="default", index=True, nullable=False
+    )
     decision: Mapped[str] = mapped_column(Text, nullable=False)
     reason: Mapped[str] = mapped_column(Text, default="", nullable=False)
     created_at: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -55,9 +61,15 @@ class DocumentSectionModel(Base):
     """Secoes estruturadas do documento colaborativo de planejamento."""
 
     __tablename__ = "document_sections"
+    __table_args__ = (
+        UniqueConstraint("session_id", "section", name="uq_document_session_section"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    section: Mapped[str] = mapped_column(String(150), unique=True, index=True, nullable=False)
+    session_id: Mapped[str] = mapped_column(
+        String(100), default="default", index=True, nullable=False
+    )
+    section: Mapped[str] = mapped_column(String(150), index=True, nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[str] = mapped_column(String(20), nullable=False)
 

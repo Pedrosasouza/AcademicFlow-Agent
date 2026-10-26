@@ -26,7 +26,7 @@ O **AcademicFlow-Agent** é um sistema colaborativo que utiliza o padrão **ReAc
 - **Arquitetura de Agentes ReAct**: Orquestração orientada a grafos de estado (`StateGraph`) com tomada de decisão dinâmica.
 - **Persistência Relacional (PostgreSQL + SQLAlchemy 2.0)**: Tarefas, decisões, seções do documento, participantes e histórico de chat armazenados no banco de dados como fonte única da verdade (*Single Source of Truth*), utilizando o padrão **Repository**.
 - **Gestão Segura de Contexto do LLM**: Persistência incremental de mensagens (`append_messages`) combinada com janela deslizante de contexto (`load_context_messages`) que evita estourar o limite de tokens do modelo local e impede `ToolMessage` órfãs.
-- **Interface Web & CLI**: Interface interativa em Streamlit com suporte a múltiplos participantes, painel de estado lateral sincronizado a cada interação/recarregamento e rastreamento de ferramentas acionadas.
+- **Interface Web & CLI Multi-Evento**: Interface interativa em Streamlit com suporte a múltiplos eventos/salas isolados por `session_id` (*multi-tenant*), múltiplos participantes, painel de estado lateral sincronizado e rastreamento de ferramentas acionadas.
 - **Privacidade & Execução Local**: Integração com Ollama (`llama3.2`), permitindo inferência local sem custos de API.
 - **Suíte de Testes Determinística (TDD)**: Cobertura com `pytest` validando modelos ORM, camada de repositório, ferramentas de colaboração e ciclo completo do grafo ReAct em `sqlite:///:memory:` (zero dependência externa em CI) ou contra o PostgreSQL via `TEST_DATABASE_URL`.
 
@@ -62,9 +62,9 @@ flowchart LR
 O esquema é criado programaticamente de forma idempotente na inicialização da aplicação via `Base.metadata.create_all(bind=engine)` em `src/database.py`, realizando também o *seed* inicial dos participantes padrão (`Alice`, `Bob`, `Charlie`):
 
 - `users`: Participantes cadastrados (`id`, `name`, `created_at`).
-- `tasks`: Tarefas do planejamento (`id`, `title`, `owner`, `deadline`, `status`, `created_at`).
-- `decisions`: Decisões tomadas e justificativas (`id`, `decision`, `reason`, `created_at`).
-- `document_sections`: Seções únicas do plano do evento (`id`, `section`, `text`, `updated_at`).
+- `tasks`: Tarefas do planejamento isoladas por sala (`id`, `session_id`, `title`, `owner`, `deadline`, `status`, `created_at`).
+- `decisions`: Decisões tomadas e justificativas por sala (`id`, `session_id`, `decision`, `reason`, `created_at`).
+- `document_sections`: Seções do plano com unicidade composta `(session_id, section)` (`id`, `session_id`, `section`, `text`, `updated_at`).
 - `chat_messages`: Histórico de mensagens (`id`, `session_id`, `role`, `content`, `tool_calls` em JSON, `tool_call_id`, `created_at`).
 
 ---

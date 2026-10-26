@@ -16,11 +16,13 @@ def clean_project_board(monkeypatch):
     test_db_url = os.getenv("TEST_DATABASE_URL", "sqlite:///:memory:")
     monkeypatch.setenv("DATABASE_URL", test_db_url)
 
-    from src import database, repository
+    from src import agent, database, repository
 
+    agent.set_active_session("default") if hasattr(agent, "set_active_session") else None
     database.reset_engine()
     database.init_db()
     repository.clear_project_board()
     yield
+    agent.set_active_session("default") if hasattr(agent, "set_active_session") else None
     repository.clear_project_board()
     database.reset_engine()
