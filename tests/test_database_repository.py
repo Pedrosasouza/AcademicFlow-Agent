@@ -412,5 +412,48 @@ def test_repository_executes_pgvector_cosine_operator_on_postgresql(monkeypatch)
     assert "vector" in executed_sql
 
 
+def test_alembic_migrations_upgrade_and_downgrade_cleanly(monkeypatch, tmp_path):
+    """Garante que o Alembic aplica upgrade('head') e downgrade('base') sem URLs fixas em alembic.ini."""
+    from pathlib import Path
+    from sqlalchemy import text
+
+    project_root = Path(__file__).resolve().parents[1]
+    alembic_ini = project_root / "alembic.ini"
+    assert alembic_ini.exists(), "O arquivo alembic.ini deve existir na raiz do projeto."
+
+    ini_content = alembic_ini.read_text(encoding="utf-8")
+    assert "postgresql+psycopg://" not in ini_content
+
+    db_file = tmp_path / "alembic_test.sqlite3"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_file.as_posix()}")
+    database.reset_engine()
+
+    database.run_migrations("head")
+
+    engine = database.get_engine()
+    inspector = inspect(engine)
+    tables_after_upgrade = set(inspector.get_table_names())
+    assert {
+        "alembic_version",
+        "users",
+        "tasks",
+        "decisions",
+        "document_sections",
+        "chat_messages",
+        "regulation_chunks",
+    }.issubset(tables_after_upgrade)
+
+    with engine.connect() as conn:
+        version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
+    assert version == "0001_initial_schema"
+
+    database.run_migrations("base")
+
+    inspector_after_downgrade = inspect(database.get_engine())
+    remaining_tables = set(inspector_after_downgrade.get_table_names()) - {"alembic_version"}
+    assert remaining_tables == set()
+
+
+
 
 

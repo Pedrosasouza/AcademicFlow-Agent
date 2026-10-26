@@ -200,6 +200,26 @@ def _enable_pgvector_if_available(engine: Engine) -> None:
         _pgvector_enabled = False
 
 
+def run_migrations(revision: str = "head") -> None:
+    """Executa migracoes versionadas do Alembic (upgrade para revision ou downgrade para 'base')."""
+    from pathlib import Path
+    from alembic import command
+    from alembic.config import Config
+
+    project_root = Path(__file__).resolve().parents[1]
+    alembic_cfg = Config(str(project_root / "alembic.ini"))
+    alembic_cfg.set_main_option("script_location", str(project_root / "migrations"))
+    alembic_cfg.set_main_option("sqlalchemy.url", get_database_url())
+
+    engine = get_engine()
+    with engine.begin() as conn:
+        alembic_cfg.attributes["connection"] = conn
+        if revision == "base":
+            command.downgrade(alembic_cfg, "base")
+        else:
+            command.upgrade(alembic_cfg, revision)
+
+
 def init_db() -> None:
     """Cria as tabelas de forma idempotente, ativa pgvector e popula usuarios e editais iniciais."""
     engine = get_engine()

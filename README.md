@@ -94,6 +94,9 @@ AcademicFlow-Agent/
 │   └── logo.png                       # Identidade visual exibida na interface
 ├── docs/
 │   └── TEST_TEMPLATES.md              # Roteiros de testes manuais e de aceitação
+├── migrations/
+│   ├── env.py                         # Ambiente Alembic integrado ao SQLAlchemy 2.0 (Base.metadata)
+│   └── versions/                      # Histórico de revisões versionadas (0001_initial_schema)
 ├── src/
 │   ├── __init__.py
 │   ├── database.py                    # Engine SQLAlchemy, sessões transacionais e init_db()
@@ -109,6 +112,7 @@ AcademicFlow-Agent/
 │   └── test_docker_configuration.py   # Testes de infraestrutura containerizada (Dockerfile e Compose)
 ├── .dockerignore                      # Exclusão de segredos (.env) e caches no contexto de build
 ├── .env.example                       # Exemplo de variáveis de ambiente
+├── alembic.ini                        # Configuração de migrações de banco de dados (Alembic)
 ├── Dockerfile                         # Imagem Python 3.11 slim com usuário não-root para a UI Streamlit
 ├── docker-compose.yml                 # Orquestração completa (PostgreSQL 16 + App Streamlit)
 ├── requirements.txt                   # Dependências de execução

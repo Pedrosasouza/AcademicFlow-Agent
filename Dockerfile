@@ -11,7 +11,9 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# Copia apenas o codigo-fonte e os ativos visuais necessarios em producao
+# Copia apenas o codigo-fonte, migracoes e ativos visuais necessarios em producao
+COPY alembic.ini ./
+COPY migrations/ ./migrations/
 COPY src/ ./src/
 COPY assets/ ./assets/
 
