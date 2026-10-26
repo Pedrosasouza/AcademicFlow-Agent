@@ -1,0 +1,33 @@
+# Git e controle de versao
+.git
+.github
+.gitignore
+.gitattributes
+
+# Variaveis de ambiente e segredos locais
+.env
+.env.*
+
+# Ambientes virtuais Python
+venv/
+.venv/
+env/
+
+# Caches e artefatos de testes
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Bancos locais SQLite e configuracoes locais
+*.db
+*.sqlite3
+.streamlit/secrets.toml
+
+# Arquivos de sistema e IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

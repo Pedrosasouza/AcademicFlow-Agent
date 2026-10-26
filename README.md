@@ -103,9 +103,12 @@ AcademicFlow-Agent/
 │   ├── conftest.py                    # Fixtures de isolamento (SQLite in-memory / TEST_DATABASE_URL)
 │   ├── test_agent_configuration.py    # Testes de configuração e fluxo do grafo ReAct
 │   ├── test_collaboration_tools.py    # Testes de integração das ferramentas com o banco
-│   └── test_database_repository.py    # Testes unitários de modelos, transações, CRUD e UI helpers
+│   ├── test_database_repository.py    # Testes unitários de modelos, transações, CRUD e UI helpers
+│   └── test_docker_configuration.py   # Testes de infraestrutura containerizada (Dockerfile e Compose)
+├── .dockerignore                      # Exclusão de segredos (.env) e caches no contexto de build
 ├── .env.example                       # Exemplo de variáveis de ambiente
-├── docker-compose.yml                 # Serviço PostgreSQL 16 local com healthcheck e volume
+├── Dockerfile                         # Imagem Python 3.11 slim com usuário não-root para a UI Streamlit
+├── docker-compose.yml                 # Orquestração completa (PostgreSQL 16 + App Streamlit)
 ├── requirements.txt                   # Dependências de execução
 ├── requirements-dev.txt               # Dependências de desenvolvimento e testes
 └── README.md
@@ -150,6 +153,18 @@ ollama serve
 | `DATABASE_URL` | `postgresql+psycopg://postgres:postgres@localhost:5432/academic_flow` | String de conexão SQLAlchemy 2.0 |
 | `OLLAMA_MODEL` | `llama3.2` | Modelo utilizado no Ollama |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Endpoint da API local do Ollama |
+
+### Execução Rápida com Docker Compose (Banco + Interface Web)
+
+Com o [Ollama](https://ollama.com) ativo na máquina hospedeira (`ollama pull llama3.2 && ollama serve`), você pode subir o **PostgreSQL 16** e a **interface Streamlit** com um único comando:
+
+```bash
+docker compose up --build -d
+```
+
+Acesse a interface web em **`http://localhost:8501`**.
+
+### Execução Local (Python no Host)
 
 ### Opção A — Interface Web (Streamlit)
 ```bash
