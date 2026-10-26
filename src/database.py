@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
+import functools
 import hashlib
 import logging
 import math
@@ -24,7 +25,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from src.models import Base, EMBEDDING_DIM, RegulationChunkModel, UserModel
+from src.models import EMBEDDING_DIM, RegulationChunkModel, UserModel
 
 load_dotenv()
 
@@ -33,6 +34,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_DATABASE_URL = (
     "postgresql+psycopg://postgres:postgres@localhost:5432/academic_flow"
 )
+DEFAULT_EMBEDDING_MODEL = "nomic-embed-text"
 DEFAULT_USERS: tuple[str, ...] = ("Alice", "Bob", "Charlie")
 
 DEFAULT_REGULATIONS: tuple[tuple[str, str, str], ...] = (
@@ -63,20 +65,29 @@ _session_factory: sessionmaker[Session] | None = None
 _pgvector_enabled: bool = False
 
 
+def normalize_l2(vec: Sequence[float]) -> list[float]:
+    """Aplica normalizacao L2 em um vetor numerico sem alterar sua dimensionalidade."""
+    values = [float(x) for x in vec]
+    if not values:
+        raise ValueError("O vetor de embedding nao pode ser vazio.")
+    norm = math.sqrt(sum(v * v for v in values))
+    if norm == 0.0:
+        values[0] = 1.0
+        return values
+    return [round(v / norm, 6) for v in values]
+
+
 def fit_embedding_dimensions(
     embedding: Sequence[float],
     dimensions: int = EMBEDDING_DIM,
 ) -> list[float]:
-    """Ajusta qualquer vetor para a dimensao fixa do banco e aplica normalizacao L2."""
-    vec = [0.0] * dimensions
-    for idx, val in enumerate(embedding):
-        vec[idx % dimensions] += float(val)
-
-    norm = math.sqrt(sum(v * v for v in vec))
-    if norm == 0.0:
-        vec[0] = 1.0
-        return vec
-    return [round(v / norm, 6) for v in vec]
+    """Valida a dimensao do vetor (permitindo zero-padding para vetores curtos de teste, sem dobrar dimensoes)."""
+    if len(embedding) > dimensions:
+        raise ValueError(
+            f"Dimensao do vetor ({len(embedding)}) excede o tamanho da coluna vector({dimensions})."
+        )
+    padded = [float(x) for x in embedding] + [0.0] * (dimensions - len(embedding))
+    return normalize_l2(padded)
 
 
 def _normalize_text(text_content: str) -> str:
@@ -111,22 +122,33 @@ def compute_trigram_embedding(
         sign = 1.0 if (digest[4] & 1) == 0 else -1.0
         vec[bucket] += sign * weight
 
-    return fit_embedding_dimensions(vec, dimensions=dimensions)
+    return normalize_l2(vec)
+
+
+@functools.lru_cache(maxsize=4)
+def _get_ollama_embedder(model_name: str, base_url: str) -> OllamaEmbeddings:
+    """Retorna uma instancia cacheada de OllamaEmbeddings para evitar recriacao a cada consulta."""
+    return OllamaEmbeddings(model=model_name, base_url=base_url)
 
 
 def compute_ollama_embedding(
     text_content: str,
     dimensions: int = EMBEDDING_DIM,
 ) -> list[float]:
-    """Gera embedding denso real via OllamaEmbeddings e ajusta para a dimensao da coluna vector."""
-    model_name = os.getenv(
-        "OLLAMA_EMBEDDING_MODEL",
-        os.getenv("OLLAMA_MODEL", "nomic-embed-text"),
+    """Gera embedding denso real via OllamaEmbeddings e valida estritamente a dimensao retornada."""
+    model_name = (
+        os.getenv("OLLAMA_EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL).strip()
+        or DEFAULT_EMBEDDING_MODEL
     )
     base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-    embedder = OllamaEmbeddings(model=model_name, base_url=base_url)
+    embedder = _get_ollama_embedder(model_name, base_url)
     raw_vector = embedder.embed_query(text_content or "")
-    return fit_embedding_dimensions(raw_vector, dimensions=dimensions)
+    if len(raw_vector) != dimensions:
+        raise ValueError(
+            f"O modelo '{model_name}' retornou {len(raw_vector)} dimensoes, "
+            f"mas a coluna do banco exige exatamente {dimensions} dimensoes."
+        )
+    return normalize_l2(raw_vector)
 
 
 def compute_embedding(
@@ -140,7 +162,7 @@ def compute_embedding(
 
     try:
         return compute_ollama_embedding(text_content, dimensions=dimensions)
-    except (ConnectError, HTTPError, RuntimeError, ValueError) as exc:
+    except (ConnectError, HTTPError) as exc:
         logger.warning(
             "Falha ao gerar embedding via Ollama (%s); utilizando fallback de n-gramas.",
             exc,
@@ -200,6 +222,7 @@ def reset_engine() -> None:
     _engine = None
     _session_factory = None
     _pgvector_enabled = False
+    _get_ollama_embedder.cache_clear()
 
 
 @contextmanager
@@ -241,7 +264,7 @@ def _enable_pgvector_if_available(engine: Engine) -> None:
 
 
 def run_migrations(revision: str = "head") -> None:
-    """Executa migracoes versionadas do Alembic como fonte unica da verdade para o DDL."""
+    """Executa migracoes versionadas do Alembic sem apagar tabelas pre-existentes."""
     project_root = Path(__file__).resolve().parents[1]
     alembic_cfg = Config(str(project_root / "alembic.ini"))
     alembic_cfg.set_main_option("script_location", str(project_root / "migrations"))
@@ -250,14 +273,18 @@ def run_migrations(revision: str = "head") -> None:
 
     engine = get_engine()
     with engine.begin() as conn:
-        if revision != "base":
-            existing_tables = set(inspect(conn).get_table_names())
-            if "users" in existing_tables and "alembic_version" not in existing_tables:
-                Base.metadata.drop_all(bind=conn)
-
         alembic_cfg.attributes["connection"] = conn
         if revision == "base":
             command.downgrade(alembic_cfg, "base")
+            return
+
+        existing_tables = set(inspect(conn).get_table_names())
+        if "users" in existing_tables and "alembic_version" not in existing_tables:
+            logger.warning(
+                "Banco pre-existente detectado sem tabela alembic_version; aplicando alembic stamp '%s' sem apagar dados.",
+                revision,
+            )
+            command.stamp(alembic_cfg, revision)
         else:
             command.upgrade(alembic_cfg, revision)
 
@@ -285,7 +312,7 @@ def _seed_initial_data() -> None:
 
 
 def init_db() -> None:
-    """Inicializa o banco aplicando as migracoes do Alembic (DDL) e o seed inicial (DML)."""
+    """Inicializa o banco aplicando as migracoes do Alembic (DDL), ativando pgvector e executando o seed inicial."""
     engine = get_engine()
     _enable_pgvector_if_available(engine)
     run_migrations("head")
