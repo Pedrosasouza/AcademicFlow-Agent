@@ -132,6 +132,7 @@ def _render_user_chooser(usuarios: list[str], session_id: str) -> None:
     """Renderiza o seletor de participante e o botao de limpeza na barra lateral."""
     with st.sidebar:
         user = st.selectbox("Selecione o usuário", usuarios)
+        st.caption("Autoria simulada para demonstração colaborativa (sem autenticação).")
         st.session_state.current_user = user
         if st.button("Limpar sessão"):
             _reset_session(session_id=session_id)

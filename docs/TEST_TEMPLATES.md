@@ -3,6 +3,8 @@
 Este arquivo serve como roteiro de testes manuais e de aceitacao para o
 AcademicFlow-Agent. Os testes unitarios automatizados ficam na pasta `tests/`.
 
+> **Nota sobre o modelo multiusuario:** a selecao de participantes na interface e a separacao por `session_id` sao recursos de organizacao logica de dados e simulacao de dinamica de grupo (contexto academico), nao devendo ser confundidos com um sistema de autenticacao e controle de acesso seguro (RBAC/JWT).
+
 ## Template 1 - Comunicacao entre usuarios e agente
 
 **Objetivo:** verificar se a interface permite enviar mensagens identificadas por usuario.

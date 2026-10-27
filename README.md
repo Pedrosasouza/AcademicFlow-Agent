@@ -28,7 +28,7 @@ O agente expõe 6 ferramentas (`@tool` em `src/agent.py`) acopladas ao banco de 
 | `search_event_regulations` | Faz busca semântica nas normas e editais da universidade usando distância de cosseno no `pgvector`. |
 
 Além das ferramentas do agente, a aplicação conta com:
-- **Isolamento por sala/evento (`session_id`)**: permite criar e alternar entre diferentes eventos (ex.: `default`, `semana_computacao`, `simposio_ia`), mantendo tarefas, documentos e histórico de chat separados.
+- **Organização de dados por sala/evento (`session_id`)**: permite criar e alternar entre diferentes eventos (ex.: `default`, `semana_computacao`, `simposio_ia`), mantendo tarefas, documentos e histórico de chat organizados separadamente de forma lógica (sem atuar como barreira de segurança ou autenticação).
 - **Sincronização incremental na interface web**: a UI em Streamlit atualiza o quadro lateral e o chat a cada 5 segundos (`@st.fragment`), buscando apenas novas mensagens no banco (`after_id`).
 - **Indexação de editais pela interface**: barra lateral com formulário para adicionar novas regras institucionais na tabela vetorial em tempo de execução.
 - **Janela de contexto segura**: `load_context_messages` envia apenas as mensagens mais recentes ao LLM e garante que o recorte nunca inicie com uma `ToolMessage` órfã.
@@ -282,7 +282,10 @@ O relatório detalhado com a discriminação por consulta e análise de calibra�
 
 ## Limitações Conhecidas e Decisões de Projeto
 
-- **Seleção de usuário sem autenticação**: o seletor de participantes na barra lateral (`Alice`, `Bob`, `Charlie`) serve para simular a interação de múltiplos membros em um trabalho acadêmico (disciplina *SSC0528 - Sistemas Colaborativos*). Não há login com senha ou token; o participante selecionado é associado por chave estrangeira (`users.id`) às tarefas e mensagens criadas.
+- **Modelo multiusuário e limites do isolamento por sessão (`session_id`)**:
+  - *Organização de dados vs. segurança de acesso*: o particionamento por `session_id` e o seletor de participantes (`Alice`, `Bob`, `Charlie`) funcionam como um mecanismo de **organização lógica dos dados** (para gerenciar múltiplos eventos de forma isolada no mesmo banco) e para viabilizar simulações de dinâmica de grupo na disciplina acadêmica (*SSC0528 - Sistemas Colaborativos*).
+  - *Ausência de autenticação e autorização*: o sistema **não implementa controle de acesso (RBAC), autenticação de identidade, senhas ou tokens criptográficos (JWT/OAuth)**. Na interface web ou na CLI, qualquer participante pode alternar livremente entre salas ou selecionar qualquer identidade para envio de mensagens.
+  - *Adaptação para produção*: em um ambiente produtivo multiusuário real, seria mandatório desacoplar a identidade da interface através de um provedor de autenticação externo (ex.: OAuth 2.0 / OpenID Connect ou JWT assinado) e validar autorizações de leitura e escrita por usuário antes de executar queries vinculadas a um `session_id`.
 - **Fallbacks de RAG para ambiente de teste**:
   1. *Geração de embeddings (`compute_embedding`)*: em uso normal (`EMBEDDING_PROVIDER=ollama`), os vetores de 768 dimensões são gerados pelo modelo `nomic-embed-text` no Ollama. Caso o Ollama esteja desligado ou durante a execução do `pytest` (`EMBEDDING_PROVIDER=trigram`), o código usa uma projeção determinística baseada em n-gramas para permitir testes offline.
   2. *Consulta vetorial (`search_regulation_chunks`)*: no PostgreSQL com `pgvector`, a ordenação ocorre direto no banco via operador `<=>` e índice HNSW. No SQLite em memória (usado nos testes unitários), a similaridade de cosseno é calculada em Python sobre os registros de teste.

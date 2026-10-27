@@ -45,6 +45,8 @@ logger = logging.getLogger(__name__)
 
 # =============================================================================
 # 1. CONTEXTO DE SESSAO E PARTICIPANTE ATIVO
+# Nota arquitetural: o session_id e o participante ativo servem para organizacao
+# logica dos dados e atribuicao de autoria, nao atuando como camada de autenticacao.
 # =============================================================================
 
 _active_session_var: ContextVar[str] = ContextVar("active_session_id", default="default")
