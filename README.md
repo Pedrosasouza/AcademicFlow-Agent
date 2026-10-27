@@ -272,11 +272,33 @@ python benchmarks/evaluate_rag.py --output-markdown docs/RAG_EVALUATION.md --out
 | **Recall@1** | 91.67% | Cobertura do documento relevante logo no primeiro resultado |
 | **Recall@3** | 91.67% | Cobertura do documento relevante considerando até 3 candidatos |
 | **MRR (Mean Reciprocal Rank)** | 0.9167 | Média de 1/rank da primeira norma relevante encontrada nas consultas no escopo |
-| **Latência (Mediana / P50)** | 189.87 ms | Tempo mediano por consulta semântica (latência média geral de 427.86 ms incluindo inicialização) |
-| **Respostas sem suporte (sem filtro)** | 100.00% | Consultas fora de escopo (ex.: restaurante universitário) recebem candidatos espúrios se nenhum limiar for aplicado |
-| **Respostas sem suporte (com limiar >= 0.68)** | 33.33% | Rejeição de 66.7% das perguntas fora de escopo (rejeição de 100% ao calibrar limiar para 0.70) |
+| **Latência Geral (Média)** | 420.03 ms | Média geral incluindo a carga inicial do modelo de embeddings na 1ª consulta |
+| **Latência Geral (Mediana / P50)** | 192.50 ms | Mediana do tempo de resposta por busca semântica |
+| **Latência Geral (P95)** | 1243.28 ms | Percentil 95 calculado via interpolação linear padrão (Hyndman & Fan Tipo 7 / NumPy), sensível ao *cold-start* |
+| **Latência em Regime Estável (P50 Warm)** | 191.19 ms | Mediana de resposta após o aquecimento do modelo (consultas 2 a 15) |
+| **Latência em Regime Estável (P95 Warm)** | 248.82 ms | Percentil 95 em regime permanente (*warm*), desconsiderando a inicialização de 3.56 s |
+| **Ruído de Busca Fora de Escopo (Sem filtro)** | 100.00% | Proporção de consultas fora de escopo que recebem trechos espúrios se nenhum limiar for aplicado |
+| **Ruído de Busca Fora de Escopo (Limiar >= 0.68)** | 33.33% | Proporção de consultas fora de escopo que ainda vazam após o corte de similaridade |
+| **Rejeição no Escopo (Limiar >= 0.68)** | 25.00% | Falsos negativos: perguntas legítimas no escopo descartadas por vocabulário menos literal |
 
-O relatório detalhado com a discriminação por consulta e análise de calibração de limiar está documentado em [`docs/RAG_EVALUATION.md`](docs/RAG_EVALUATION.md).
+### Análise de Trade-off de Limiares de Similaridade
+
+A filtragem por limiar escalar estático impõe um compromisso direto entre a rejeição de ruído fora de escopo e a preservação de consultas pertinentes:
+
+| Limiar ($T$) | Rejeição no Escopo (Falso Negativo) | Precisão Efetiva Top-1 (No Escopo) | Vazamento Fora de Escopo (Falso Positivo) | Rejeição Fora de Escopo (Verdadeiro Negativo) |
+|:---|:---|:---|:---|:---|
+| 0.00 (sem filtro) | 0.00% (0/12) | 91.67% (11/12) | 100.00% (3/3) | 0.00% (0/3) |
+| 0.55 | 0.00% (0/12) | 91.67% (11/12) | 100.00% (3/3) | 0.00% (0/3) |
+| 0.60 | 16.67% (2/12) | 75.00% (9/12) | 66.67% (2/3) | 33.33% (1/3) |
+| 0.65 | 25.00% (3/12) | 66.67% (8/12) | 33.33% (1/3) | 66.67% (2/3) |
+| 0.68 | 25.00% (3/12) | 66.67% (8/12) | 33.33% (1/3) | 66.67% (2/3) |
+| 0.70 | 41.67% (5/12) | 58.33% (7/12) | 0.00% (0/3) | 100.00% (3/3) |
+
+> **Nota Metodológica sobre o RAG**:
+> 1. *Recuperação (IR) vs. Alucinação*: este benchmark quantifica o mecanismo de recuperação de informação (*retrieval*). Ele não equivale diretamente à taxa de alucinação do agente, pois o modelo possui instruções de checagem contextual antes de responder. A avaliação da fidelidade factual (*faithfulness*) das respostas do LLM constitui o próximo passo com ferramentas como Ragas.
+> 2. *Natureza do Corpus*: as 4 normas cadastradas e as 15 perguntas associadas formam um corpus didático e sintético de referência técnica para demonstração da orquestração de banco relacional e vetorial, não constituindo parecer jurídico ou resoluções institucionais oficiais vigentes.
+
+O relatório detalhado com a discriminação por consulta e metodologia está documentado em [`docs/RAG_EVALUATION.md`](docs/RAG_EVALUATION.md).
 
 ---
 
