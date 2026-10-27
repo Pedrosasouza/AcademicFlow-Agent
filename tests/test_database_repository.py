@@ -489,6 +489,63 @@ def test_run_migrations_stamps_legacy_db_without_dropping_data(monkeypatch, tmp_
     assert version == "0001_initial_schema"
 
 
+def test_legacy_database_without_alembic_upgrades_schema_and_backfills_foreign_keys(monkeypatch, tmp_path):
+    """Garante que um banco legado com colunas ausentes e adaptado para os modelos atuais sem perda de dados."""
+    import sqlite3
+    from sqlalchemy import text
+
+    db_file = tmp_path / "legacy_v0.sqlite3"
+    # 1. Cria esquema antigo (sem session_id, sem owner_id, sem sessions, sem regulation_chunks)
+    raw_conn = sqlite3.connect(str(db_file))
+    raw_conn.execute("CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, created_at TEXT)")
+    raw_conn.execute("CREATE TABLE tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, owner TEXT, deadline TEXT, status TEXT, created_at TEXT)")
+    raw_conn.execute("CREATE TABLE decisions (id INTEGER PRIMARY KEY AUTOINCREMENT, decision TEXT, reason TEXT, created_at TEXT)")
+    raw_conn.execute("CREATE TABLE chat_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, role TEXT, content TEXT, created_at TEXT)")
+
+    # Insere dados legados
+    raw_conn.execute("INSERT INTO users (name, created_at) VALUES ('Alice', '2026-01-01 10:00:00')")
+    raw_conn.execute("INSERT INTO tasks (title, owner, deadline, status, created_at) VALUES ('Tarefa Antiga', 'Alice', 'amanha', 'pendente', '2026-01-01 10:05:00')")
+    raw_conn.execute("INSERT INTO decisions (decision, reason, created_at) VALUES ('Decisao Antiga', 'Motivo historico', '2026-01-01 10:10:00')")
+    raw_conn.execute("INSERT INTO chat_messages (role, content, created_at) VALUES ('human', 'Mensagem historica', '2026-01-01 10:15:00')")
+    raw_conn.commit()
+    raw_conn.close()
+
+    # 2. Configura a aplicacao para rodar sobre esse banco legado e chama init_db()
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_file.as_posix()}")
+    database.reset_engine()
+
+    database.init_db()
+
+    # 3. Verifica que todas as tabelas atuais e colunas foram devidamente adicionadas
+    inspector = inspect(database.get_engine())
+    tables = set(inspector.get_table_names())
+    assert {"alembic_version", "sessions", "users", "tasks", "decisions", "document_sections", "chat_messages", "regulation_chunks"}.issubset(tables)
+
+    task_cols = {col["name"].lower() for col in inspector.get_columns("tasks")}
+    assert {"id", "session_id", "title", "owner", "owner_id", "deadline", "status"}.issubset(task_cols)
+
+    decision_cols = {col["name"].lower() for col in inspector.get_columns("decisions")}
+    assert {"id", "session_id", "decision", "reason"}.issubset(decision_cols)
+
+    chat_cols = {col["name"].lower() for col in inspector.get_columns("chat_messages")}
+    assert {"id", "session_id", "role", "author", "user_id", "content", "tool_calls", "tool_call_id"}.issubset(chat_cols)
+
+    # 4. Verifica que os dados legados foram preservados, session_id normalizado para 'default' e FK vinculada
+    board = repository.get_project_board(session_id="default")
+    assert len(board["tasks"]) == 1
+    legacy_task = board["tasks"][0]
+    assert legacy_task["title"] == "Tarefa Antiga"
+    assert legacy_task["owner"] == "Alice"
+    assert legacy_task["owner_id"] == 1  # Vinculado automaticamente ao usuario Alice (FK)
+
+    assert len(board["decisions"]) == 1
+    assert board["decisions"][0]["decision"] == "Decisao Antiga"
+
+    msgs = repository.load_messages(session_id="default")
+    assert len(msgs) >= 1
+    assert any(m.content == "Mensagem historica" for m in msgs)
+
+
 def test_alembic_migrations_upgrade_and_downgrade_cleanly(monkeypatch, tmp_path):
     """Garante que o Alembic aplica upgrade('head') e downgrade('base') sem URLs fixas em alembic.ini."""
     from pathlib import Path

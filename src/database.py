@@ -288,6 +288,71 @@ def _enable_pgvector_if_available(engine: Engine) -> None:
         set_pgvector_enabled(False)
 
 
+def _ensure_legacy_schema_compatibility(conn: Any) -> None:
+    """Atualiza o esquema de bancos pre-existentes sem alembic_version para refletir os modelos atuais."""
+    inspector = inspect(conn)
+    existing_tables = set(inspector.get_table_names())
+
+    # 1. Cria tabelas ausentes que existem nos modelos atuais (ex: sessions, regulation_chunks)
+    Base.metadata.create_all(bind=conn)
+
+    # 2. Definição das colunas essenciais esperadas em cada tabela legada
+    # Formato: (tabela, coluna, tipo_sql, default_sql)
+    required_columns: list[tuple[str, str, str, str | None]] = [
+        ("tasks", "session_id", "VARCHAR(100)", "'default'"),
+        ("tasks", "owner_id", "INTEGER", "NULL"),
+        ("tasks", "created_at", "TIMESTAMP", "CURRENT_TIMESTAMP"),
+        ("decisions", "session_id", "VARCHAR(100)", "'default'"),
+        ("decisions", "created_at", "TIMESTAMP", "CURRENT_TIMESTAMP"),
+        ("document_sections", "session_id", "VARCHAR(100)", "'default'"),
+        ("document_sections", "updated_at", "TIMESTAMP", "CURRENT_TIMESTAMP"),
+        ("chat_messages", "session_id", "VARCHAR(100)", "'default'"),
+        ("chat_messages", "author", "VARCHAR(100)", "NULL"),
+        ("chat_messages", "user_id", "INTEGER", "NULL"),
+        ("chat_messages", "tool_calls", "JSON", "NULL"),
+        ("chat_messages", "tool_call_id", "VARCHAR(100)", "NULL"),
+        ("chat_messages", "created_at", "TIMESTAMP", "CURRENT_TIMESTAMP"),
+    ]
+
+    for table_name, col_name, col_type, default_val in required_columns:
+        if table_name in existing_tables:
+            current_cols = {col["name"].lower() for col in inspect(conn).get_columns(table_name)}
+            if col_name.lower() not in current_cols:
+                default_clause = f" DEFAULT {default_val}" if default_val is not None else ""
+                sql = f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_type}{default_clause}"
+                conn.execute(text(sql))
+                logger.info("Migracao legada: adicionada coluna '%s.%s'.", table_name, col_name)
+
+    # 3. Garante que a sessao 'default' existe na tabela sessions
+    conn.execute(
+        text("INSERT INTO sessions (id) SELECT 'default' WHERE NOT EXISTS (SELECT 1 FROM sessions WHERE id = 'default')")
+    )
+
+    # 4. Normaliza session_id caso haja registros nulos em tabelas legadas
+    for tbl in ("tasks", "decisions", "document_sections", "chat_messages"):
+        if tbl in existing_tables:
+            conn.execute(text(f"UPDATE {tbl} SET session_id = 'default' WHERE session_id IS NULL OR session_id = ''"))
+
+    # 5. Vincula chaves estrangeiras (owner_id / user_id) a partir dos nomes existentes em users
+    if "users" in existing_tables:
+        if "tasks" in existing_tables:
+            conn.execute(
+                text(
+                    "UPDATE tasks SET owner_id = ("
+                    "  SELECT users.id FROM users WHERE LOWER(users.name) = LOWER(tasks.owner) LIMIT 1"
+                    ") WHERE tasks.owner_id IS NULL AND tasks.owner IS NOT NULL"
+                )
+            )
+        if "chat_messages" in existing_tables:
+            conn.execute(
+                text(
+                    "UPDATE chat_messages SET user_id = ("
+                    "  SELECT users.id FROM users WHERE LOWER(users.name) = LOWER(chat_messages.author) LIMIT 1"
+                    ") WHERE chat_messages.user_id IS NULL AND chat_messages.author IS NOT NULL"
+                )
+            )
+
+
 def run_migrations(revision: str = "head") -> None:
     """Executa migracoes versionadas do Alembic sem apagar tabelas pre-existentes."""
     project_root = Path(__file__).resolve().parents[1]
@@ -306,10 +371,10 @@ def run_migrations(revision: str = "head") -> None:
         existing_tables = set(inspect(conn).get_table_names())
         if "users" in existing_tables and "alembic_version" not in existing_tables:
             logger.warning(
-                "Banco pre-existente detectado sem tabela alembic_version; aplicando alembic stamp '%s' sem apagar dados.",
+                "Banco pre-existente detectado sem tabela alembic_version; sincronizando colunas e aplicando alembic stamp '%s'.",
                 revision,
             )
-            Base.metadata.create_all(bind=conn)
+            _ensure_legacy_schema_compatibility(conn)
             command.stamp(alembic_cfg, revision)
         else:
             command.upgrade(alembic_cfg, revision)
