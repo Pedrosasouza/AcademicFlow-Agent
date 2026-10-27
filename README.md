@@ -106,7 +106,13 @@ Na inicialização da aplicação (`init_db()` em `src/database.py`), o sistema 
 AcademicFlow-Agent/
 ├── .github/workflows/tests.yml        # CI executando pytest em SQLite e PostgreSQL 16
 ├── assets/logo.png                    # Logo exibida na interface Streamlit
-├── docs/TEST_TEMPLATES.md             # Roteiros para testes manuais na interface
+├── benchmarks/
+│   ├── evaluate_rag.py                # Script reproduzivel de avaliacao de busca vetorial
+│   ├── rag_benchmark_dataset.json     # Dataset versionado com perguntas e ground truth
+│   └── results/                       # Metricas detalhadas exportadas em JSON
+├── docs/
+│   ├── RAG_EVALUATION.md              # Relatorio quantitativo detalhado da avaliacao do RAG
+│   └── TEST_TEMPLATES.md              # Roteiros para testes manuais na interface
 ├── migrations/                        # Ambiente e revisões de schema do Alembic
 ├── src/
 │   ├── database.py                    # Engine SQLAlchemy, sessões, migrações e embeddings
@@ -120,6 +126,7 @@ AcademicFlow-Agent/
 │   ├── test_collaboration_tools.py    # Testes das ferramentas de colaboração e RAG
 │   ├── test_database_repository.py    # Testes de ORM, repositório, Alembic e pgvector
 │   ├── test_docker_configuration.py   # Validação de Dockerfile e docker-compose.yml
+│   ├── test_rag_benchmark.py          # Testes unitarios da suite de benchmark do RAG
 │   └── test_ui.py                     # Testes da interface Streamlit
 ├── .env.example                       # Exemplo de variáveis de ambiente
 ├── alembic.ini                        # Configuração do Alembic
@@ -241,6 +248,33 @@ O que é coberto em `tests/`:
 - `test_agent_configuration.py`: compilação do grafo no LangGraph, ciclo completo de chamada de ferramenta, resposta direta e tratamento de erros de conexão na CLI.
 - `test_ui.py`: sincronização de estado da interface Streamlit, criação de salas, cadastro de normas no painel lateral e mensagens de erro quando o banco ou o Ollama estão inacessíveis.
 - `test_docker_configuration.py`: verificação de boas práticas no `Dockerfile`, `.dockerignore` e `docker-compose.yml`.
+- `test_rag_benchmark.py`: cálculo determinístico de métricas de recuperação (Precision@k, Recall@k, MRR), detecção de falso positivo para perguntas fora de escopo e geração do relatório técnico.
+
+---
+
+## Avaliação Quantitativa do RAG
+
+Para evidenciar empiricamente a eficácia da recuperação vetorial sobre as normas institucionais, o projeto conta com um pipeline de benchmark reproduzível em `benchmarks/evaluate_rag.py` executado sobre um dataset versionado (`benchmarks/rag_benchmark_dataset.json`):
+
+```bash
+# Executa o benchmark e gera os relatórios em Markdown e JSON
+python benchmarks/evaluate_rag.py --output-markdown docs/RAG_EVALUATION.md --output-json benchmarks/results/rag_evaluation_report.json
+```
+
+### Resultados Empíricos Observados (PostgreSQL 16 + pgvector + nomic-embed-text)
+
+| Métrica | Resultado | O que avalia |
+|:--------|:----------|:-------------|
+| **Precision@1** | 91.67% | Proporção de consultas em que o primeiro resultado retornado é o documento relevante esperado |
+| **Precision@3** | 30.55% | Proporção de itens relevantes no top-3 retornado (cada pergunta possui 1 trecho relevante no banco) |
+| **Recall@1** | 91.67% | Cobertura do documento relevante logo no primeiro resultado |
+| **Recall@3** | 91.67% | Cobertura do documento relevante considerando até 3 candidatos |
+| **MRR (Mean Reciprocal Rank)** | 0.9167 | Média de 1/rank da primeira norma relevante encontrada nas consultas no escopo |
+| **Latência (Mediana / P50)** | 189.87 ms | Tempo mediano por consulta semântica (latência média geral de 427.86 ms incluindo inicialização) |
+| **Respostas sem suporte (sem filtro)** | 100.00% | Consultas fora de escopo (ex.: restaurante universitário) recebem candidatos espúrios se nenhum limiar for aplicado |
+| **Respostas sem suporte (com limiar >= 0.68)** | 33.33% | Rejeição de 66.7% das perguntas fora de escopo (rejeição de 100% ao calibrar limiar para 0.70) |
+
+O relatório detalhado com a discriminação por consulta e análise de calibração de limiar está documentado em [`docs/RAG_EVALUATION.md`](docs/RAG_EVALUATION.md).
 
 ---
 

@@ -8,6 +8,7 @@ from collections.abc import Sequence
 from datetime import date, datetime, timezone
 import logging
 import math
+import os
 import re
 from typing import Any
 import unicodedata
@@ -226,6 +227,7 @@ def search_regulation_chunks(
     query: str,
     query_embedding: Sequence[float] | None = None,
     top_k: int = 3,
+    min_score: float | None = None,
 ) -> list[dict[str, Any]]:
     """Busca os trechos mais relevantes usando pgvector (<=> com HNSW) em producao.
 
@@ -239,6 +241,15 @@ def search_regulation_chunks(
         else compute_embedding(query)
     )
     engine = get_engine()
+
+    effective_min_score = min_score
+    if effective_min_score is None:
+        raw_env_threshold = os.getenv("RAG_MIN_SCORE", "").strip()
+        if raw_env_threshold:
+            try:
+                effective_min_score = float(raw_env_threshold)
+            except ValueError:
+                effective_min_score = None
 
     with get_db_session() as session:
         if engine.dialect.name == "postgresql" and database.is_pgvector_enabled():
@@ -256,7 +267,7 @@ def search_regulation_chunks(
                     "top_k": top_k,
                 },
             ).all()
-            return [
+            results = [
                 {
                     "id": row._mapping["id"],
                     "source": row._mapping["source"],
@@ -266,6 +277,9 @@ def search_regulation_chunks(
                 }
                 for row in rows
             ]
+            if effective_min_score is not None:
+                results = [r for r in results if r["score"] >= effective_min_score]
+            return results
 
         # Fallback em memoria exclusivo para testes/CI (SQLite) ou Postgres sem pgvector
         candidates = session.scalars(select(RegulationChunkModel)).all()
@@ -280,7 +294,10 @@ def search_regulation_chunks(
             for item in candidates
         ]
         scored.sort(key=lambda r: r["score"], reverse=True)
-        return scored[:top_k]
+        top_candidates = scored[:top_k]
+        if effective_min_score is not None:
+            top_candidates = [r for r in top_candidates if r["score"] >= effective_min_score]
+        return top_candidates
 
 
 def list_users() -> list[str]:

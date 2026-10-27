@@ -1,0 +1,518 @@
+{
+  "summary": {
+    "total_queries": 15,
+    "in_scope_queries": 12,
+    "out_of_scope_queries": 3,
+    "top_k": 3,
+    "threshold": 0.68,
+    "mean_precision_at_k": {
+      "1": 0.9167,
+      "2": 0.4583,
+      "3": 0.3055
+    },
+    "mean_recall_at_k": {
+      "1": 0.9167,
+      "2": 0.9167,
+      "3": 0.9167
+    },
+    "mrr": 0.9167,
+    "latency_ms_mean": 427.86,
+    "latency_ms_p50": 189.87,
+    "latency_ms_p95": 238.45,
+    "latency_ms_min": 145.3,
+    "latency_ms_max": 3744.04,
+    "unfiltered_unsupported_rate": 1.0,
+    "filtered_unsupported_rate": 0.3333
+  },
+  "results": [
+    {
+      "query_id": "q01",
+      "query": "qual a antecedência mínima para reservar o auditório principal?",
+      "category": "auditorio_e_salas",
+      "is_in_scope": true,
+      "expected_titles": [
+        "Reserva de Auditorio e Salas"
+      ],
+      "retrieved_titles": [
+        "Reserva de Auditorio e Salas",
+        "Emissao de Certificados e Frequencia Minima",
+        "Submissao de Artigos e Comite Cientifico"
+      ],
+      "retrieved_scores": [
+        0.794,
+        0.7094,
+        0.6281
+      ],
+      "latency_ms": 3744.04,
+      "precision_at_k": {
+        "1": 1.0,
+        "2": 0.5,
+        "3": 0.3333
+      },
+      "recall_at_k": {
+        "1": 1.0,
+        "2": 1.0,
+        "3": 1.0
+      },
+      "reciprocal_rank": 1.0,
+      "is_unsupported_candidate": false,
+      "filtered_out_by_threshold": false
+    },
+    {
+      "query_id": "q02",
+      "query": "como funciona a aprovação de salas e auditório para evento acadêmico?",
+      "category": "auditorio_e_salas",
+      "is_in_scope": true,
+      "expected_titles": [
+        "Reserva de Auditorio e Salas"
+      ],
+      "retrieved_titles": [
+        "Reserva de Auditorio e Salas",
+        "Submissao de Artigos e Comite Cientifico",
+        "Emissao de Certificados e Frequencia Minima"
+      ],
+      "retrieved_scores": [
+        0.8091,
+        0.703,
+        0.6701
+      ],
+      "latency_ms": 180.09,
+      "precision_at_k": {
+        "1": 1.0,
+        "2": 0.5,
+        "3": 0.3333
+      },
+      "recall_at_k": {
+        "1": 1.0,
+        "2": 1.0,
+        "3": 1.0
+      },
+      "reciprocal_rank": 1.0,
+      "is_unsupported_candidate": false,
+      "filtered_out_by_threshold": false
+    },
+    {
+      "query_id": "q03",
+      "query": "com quantos dias de antecedência preciso solicitar o espaço no sistema institucional?",
+      "category": "auditorio_e_salas",
+      "is_in_scope": true,
+      "expected_titles": [
+        "Reserva de Auditorio e Salas"
+      ],
+      "retrieved_titles": [
+        "Reserva de Auditorio e Salas",
+        "Emissao de Certificados e Frequencia Minima",
+        "Submissao de Artigos e Comite Cientifico"
+      ],
+      "retrieved_scores": [
+        0.5891,
+        0.5655,
+        0.55
+      ],
+      "latency_ms": 210.01,
+      "precision_at_k": {
+        "1": 1.0,
+        "2": 0.5,
+        "3": 0.3333
+      },
+      "recall_at_k": {
+        "1": 1.0,
+        "2": 1.0,
+        "3": 1.0
+      },
+      "reciprocal_rank": 1.0,
+      "is_unsupported_candidate": false,
+      "filtered_out_by_threshold": true
+    },
+    {
+      "query_id": "q04",
+      "query": "qual o limite de gastos com coffee break e alimentação?",
+      "category": "coffee_break",
+      "is_in_scope": true,
+      "expected_titles": [
+        "Orcamento e Prestacao de Contas de Coffee Break"
+      ],
+      "retrieved_titles": [
+        "Orcamento e Prestacao de Contas de Coffee Break",
+        "Emissao de Certificados e Frequencia Minima",
+        "Submissao de Artigos e Comite Cientifico"
+      ],
+      "retrieved_scores": [
+        0.8135,
+        0.5575,
+        0.5434
+      ],
+      "latency_ms": 145.3,
+      "precision_at_k": {
+        "1": 1.0,
+        "2": 0.5,
+        "3": 0.3333
+      },
+      "recall_at_k": {
+        "1": 1.0,
+        "2": 1.0,
+        "3": 1.0
+      },
+      "reciprocal_rank": 1.0,
+      "is_unsupported_candidate": false,
+      "filtered_out_by_threshold": false
+    },
+    {
+      "query_id": "q05",
+      "query": "quais os documentos necessários para prestação de contas de lanches dos convidados?",
+      "category": "coffee_break",
+      "is_in_scope": true,
+      "expected_titles": [
+        "Orcamento e Prestacao de Contas de Coffee Break"
+      ],
+      "retrieved_titles": [
+        "Orcamento e Prestacao de Contas de Coffee Break",
+        "Emissao de Certificados e Frequencia Minima",
+        "Reserva de Auditorio e Salas"
+      ],
+      "retrieved_scores": [
+        0.5726,
+        0.5675,
+        0.5626
+      ],
+      "latency_ms": 185.38,
+      "precision_at_k": {
+        "1": 1.0,
+        "2": 0.5,
+        "3": 0.3333
+      },
+      "recall_at_k": {
+        "1": 1.0,
+        "2": 1.0,
+        "3": 1.0
+      },
+      "reciprocal_rank": 1.0,
+      "is_unsupported_candidate": false,
+      "filtered_out_by_threshold": true
+    },
+    {
+      "query_id": "q06",
+      "query": "posso gastar 30% da verba do edital em comida para os participantes?",
+      "category": "coffee_break",
+      "is_in_scope": true,
+      "expected_titles": [
+        "Orcamento e Prestacao de Contas de Coffee Break"
+      ],
+      "retrieved_titles": [
+        "Emissao de Certificados e Frequencia Minima",
+        "Submissao de Artigos e Comite Cientifico",
+        "Reserva de Auditorio e Salas"
+      ],
+      "retrieved_scores": [
+        0.6952,
+        0.6921,
+        0.6279
+      ],
+      "latency_ms": 162.65,
+      "precision_at_k": {
+        "1": 0.0,
+        "2": 0.0,
+        "3": 0.0
+      },
+      "recall_at_k": {
+        "1": 0.0,
+        "2": 0.0,
+        "3": 0.0
+      },
+      "reciprocal_rank": 0.0,
+      "is_unsupported_candidate": false,
+      "filtered_out_by_threshold": false
+    },
+    {
+      "query_id": "q07",
+      "query": "quantas presenças são necessárias para emissão de certificados oficiais?",
+      "category": "certificados",
+      "is_in_scope": true,
+      "expected_titles": [
+        "Emissao de Certificados e Frequencia Minima"
+      ],
+      "retrieved_titles": [
+        "Emissao de Certificados e Frequencia Minima",
+        "Submissao de Artigos e Comite Cientifico",
+        "Reserva de Auditorio e Salas"
+      ],
+      "retrieved_scores": [
+        0.7775,
+        0.6301,
+        0.6208
+      ],
+      "latency_ms": 238.45,
+      "precision_at_k": {
+        "1": 1.0,
+        "2": 0.5,
+        "3": 0.3333
+      },
+      "recall_at_k": {
+        "1": 1.0,
+        "2": 1.0,
+        "3": 1.0
+      },
+      "reciprocal_rank": 1.0,
+      "is_unsupported_candidate": false,
+      "filtered_out_by_threshold": false
+    },
+    {
+      "query_id": "q08",
+      "query": "qual o percentual de frequência mínima exigido no sistema Apolo?",
+      "category": "certificados",
+      "is_in_scope": true,
+      "expected_titles": [
+        "Emissao de Certificados e Frequencia Minima"
+      ],
+      "retrieved_titles": [
+        "Emissao de Certificados e Frequencia Minima",
+        "Reserva de Auditorio e Salas",
+        "Orcamento e Prestacao de Contas de Coffee Break"
+      ],
+      "retrieved_scores": [
+        0.762,
+        0.6177,
+        0.5565
+      ],
+      "latency_ms": 219.42,
+      "precision_at_k": {
+        "1": 1.0,
+        "2": 0.5,
+        "3": 0.3333
+      },
+      "recall_at_k": {
+        "1": 1.0,
+        "2": 1.0,
+        "3": 1.0
+      },
+      "reciprocal_rank": 1.0,
+      "is_unsupported_candidate": false,
+      "filtered_out_by_threshold": false
+    },
+    {
+      "query_id": "q09",
+      "query": "como os ouvintes cadastrados conseguem o comprovante de participação?",
+      "category": "certificados",
+      "is_in_scope": true,
+      "expected_titles": [
+        "Emissao de Certificados e Frequencia Minima"
+      ],
+      "retrieved_titles": [
+        "Emissao de Certificados e Frequencia Minima",
+        "Submissao de Artigos e Comite Cientifico",
+        "Reserva de Auditorio e Salas"
+      ],
+      "retrieved_scores": [
+        0.6868,
+        0.6474,
+        0.6361
+      ],
+      "latency_ms": 205.74,
+      "precision_at_k": {
+        "1": 1.0,
+        "2": 0.5,
+        "3": 0.3333
+      },
+      "recall_at_k": {
+        "1": 1.0,
+        "2": 1.0,
+        "3": 1.0
+      },
+      "reciprocal_rank": 1.0,
+      "is_unsupported_candidate": false,
+      "filtered_out_by_threshold": false
+    },
+    {
+      "query_id": "q10",
+      "query": "qual o prazo para publicação do edital de submissão de trabalhos científicos?",
+      "category": "submissao_artigos",
+      "is_in_scope": true,
+      "expected_titles": [
+        "Submissao de Artigos e Comite Cientifico"
+      ],
+      "retrieved_titles": [
+        "Submissao de Artigos e Comite Cientifico",
+        "Emissao de Certificados e Frequencia Minima",
+        "Orcamento e Prestacao de Contas de Coffee Break"
+      ],
+      "retrieved_scores": [
+        0.8265,
+        0.6182,
+        0.6112
+      ],
+      "latency_ms": 221.47,
+      "precision_at_k": {
+        "1": 1.0,
+        "2": 0.5,
+        "3": 0.3333
+      },
+      "recall_at_k": {
+        "1": 1.0,
+        "2": 1.0,
+        "3": 1.0
+      },
+      "reciprocal_rank": 1.0,
+      "is_unsupported_candidate": false,
+      "filtered_out_by_threshold": false
+    },
+    {
+      "query_id": "q11",
+      "query": "como deve ser feita a avaliação dos artigos do simpósio acadêmico?",
+      "category": "submissao_artigos",
+      "is_in_scope": true,
+      "expected_titles": [
+        "Submissao de Artigos e Comite Cientifico"
+      ],
+      "retrieved_titles": [
+        "Submissao de Artigos e Comite Cientifico",
+        "Reserva de Auditorio e Salas",
+        "Emissao de Certificados e Frequencia Minima"
+      ],
+      "retrieved_scores": [
+        0.707,
+        0.7032,
+        0.6772
+      ],
+      "latency_ms": 175.97,
+      "precision_at_k": {
+        "1": 1.0,
+        "2": 0.5,
+        "3": 0.3333
+      },
+      "recall_at_k": {
+        "1": 1.0,
+        "2": 1.0,
+        "3": 1.0
+      },
+      "reciprocal_rank": 1.0,
+      "is_unsupported_candidate": false,
+      "filtered_out_by_threshold": false
+    },
+    {
+      "query_id": "q12",
+      "query": "quem pode compor o comitê de pareceristas na revisão duplo-cega?",
+      "category": "submissao_artigos",
+      "is_in_scope": true,
+      "expected_titles": [
+        "Submissao de Artigos e Comite Cientifico"
+      ],
+      "retrieved_titles": [
+        "Submissao de Artigos e Comite Cientifico",
+        "Emissao de Certificados e Frequencia Minima",
+        "Reserva de Auditorio e Salas"
+      ],
+      "retrieved_scores": [
+        0.6208,
+        0.5585,
+        0.5554
+      ],
+      "latency_ms": 189.87,
+      "precision_at_k": {
+        "1": 1.0,
+        "2": 0.5,
+        "3": 0.3333
+      },
+      "recall_at_k": {
+        "1": 1.0,
+        "2": 1.0,
+        "3": 1.0
+      },
+      "reciprocal_rank": 1.0,
+      "is_unsupported_candidate": false,
+      "filtered_out_by_threshold": true
+    },
+    {
+      "query_id": "q13",
+      "query": "qual o horário de funcionamento do restaurante universitário aos finais de semana?",
+      "category": "fora_de_escopo",
+      "is_in_scope": false,
+      "expected_titles": [],
+      "retrieved_titles": [
+        "Orcamento e Prestacao de Contas de Coffee Break",
+        "Reserva de Auditorio e Salas",
+        "Emissao de Certificados e Frequencia Minima"
+      ],
+      "retrieved_scores": [
+        0.6227,
+        0.5917,
+        0.5616
+      ],
+      "latency_ms": 210.49,
+      "precision_at_k": {
+        "1": 0.0,
+        "2": 0.0,
+        "3": 0.0
+      },
+      "recall_at_k": {
+        "1": 0.0,
+        "2": 0.0,
+        "3": 0.0
+      },
+      "reciprocal_rank": 0.0,
+      "is_unsupported_candidate": true,
+      "filtered_out_by_threshold": true
+    },
+    {
+      "query_id": "q14",
+      "query": "como solicitar bolsa de auxílio permanência ou moradia estudantil?",
+      "category": "fora_de_escopo",
+      "is_in_scope": false,
+      "expected_titles": [],
+      "retrieved_titles": [
+        "Reserva de Auditorio e Salas",
+        "Emissao de Certificados e Frequencia Minima",
+        "Orcamento e Prestacao de Contas de Coffee Break"
+      ],
+      "retrieved_scores": [
+        0.6814,
+        0.6119,
+        0.6084
+      ],
+      "latency_ms": 162.89,
+      "precision_at_k": {
+        "1": 0.0,
+        "2": 0.0,
+        "3": 0.0
+      },
+      "recall_at_k": {
+        "1": 0.0,
+        "2": 0.0,
+        "3": 0.0
+      },
+      "reciprocal_rank": 0.0,
+      "is_unsupported_candidate": true,
+      "filtered_out_by_threshold": false
+    },
+    {
+      "query_id": "q15",
+      "query": "qual o procedimento para reserva de vagas de estacionamento para visitantes?",
+      "category": "fora_de_escopo",
+      "is_in_scope": false,
+      "expected_titles": [],
+      "retrieved_titles": [
+        "Reserva de Auditorio e Salas",
+        "Orcamento e Prestacao de Contas de Coffee Break",
+        "Emissao de Certificados e Frequencia Minima"
+      ],
+      "retrieved_scores": [
+        0.5855,
+        0.5506,
+        0.5505
+      ],
+      "latency_ms": 166.16,
+      "precision_at_k": {
+        "1": 0.0,
+        "2": 0.0,
+        "3": 0.0
+      },
+      "recall_at_k": {
+        "1": 0.0,
+        "2": 0.0,
+        "3": 0.0
+      },
+      "reciprocal_rank": 0.0,
+      "is_unsupported_candidate": true,
+      "filtered_out_by_threshold": true
+    }
+  ]
+}

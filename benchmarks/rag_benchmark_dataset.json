@@ -1,0 +1,131 @@
+[
+  {
+    "id": "q01",
+    "query": "qual a antecedência mínima para reservar o auditório principal?",
+    "category": "auditorio_e_salas",
+    "is_in_scope": true,
+    "expected_relevant_titles": [
+      "Reserva de Auditorio e Salas"
+    ]
+  },
+  {
+    "id": "q02",
+    "query": "como funciona a aprovação de salas e auditório para evento acadêmico?",
+    "category": "auditorio_e_salas",
+    "is_in_scope": true,
+    "expected_relevant_titles": [
+      "Reserva de Auditorio e Salas"
+    ]
+  },
+  {
+    "id": "q03",
+    "query": "com quantos dias de antecedência preciso solicitar o espaço no sistema institucional?",
+    "category": "auditorio_e_salas",
+    "is_in_scope": true,
+    "expected_relevant_titles": [
+      "Reserva de Auditorio e Salas"
+    ]
+  },
+  {
+    "id": "q04",
+    "query": "qual o limite de gastos com coffee break e alimentação?",
+    "category": "coffee_break",
+    "is_in_scope": true,
+    "expected_relevant_titles": [
+      "Orcamento e Prestacao de Contas de Coffee Break"
+    ]
+  },
+  {
+    "id": "q05",
+    "query": "quais os documentos necessários para prestação de contas de lanches dos convidados?",
+    "category": "coffee_break",
+    "is_in_scope": true,
+    "expected_relevant_titles": [
+      "Orcamento e Prestacao de Contas de Coffee Break"
+    ]
+  },
+  {
+    "id": "q06",
+    "query": "posso gastar 30% da verba do edital em comida para os participantes?",
+    "category": "coffee_break",
+    "is_in_scope": true,
+    "expected_relevant_titles": [
+      "Orcamento e Prestacao de Contas de Coffee Break"
+    ]
+  },
+  {
+    "id": "q07",
+    "query": "quantas presenças são necessárias para emissão de certificados oficiais?",
+    "category": "certificados",
+    "is_in_scope": true,
+    "expected_relevant_titles": [
+      "Emissao de Certificados e Frequencia Minima"
+    ]
+  },
+  {
+    "id": "q08",
+    "query": "qual o percentual de frequência mínima exigido no sistema Apolo?",
+    "category": "certificados",
+    "is_in_scope": true,
+    "expected_relevant_titles": [
+      "Emissao de Certificados e Frequencia Minima"
+    ]
+  },
+  {
+    "id": "q09",
+    "query": "como os ouvintes cadastrados conseguem o comprovante de participação?",
+    "category": "certificados",
+    "is_in_scope": true,
+    "expected_relevant_titles": [
+      "Emissao de Certificados e Frequencia Minima"
+    ]
+  },
+  {
+    "id": "q10",
+    "query": "qual o prazo para publicação do edital de submissão de trabalhos científicos?",
+    "category": "submissao_artigos",
+    "is_in_scope": true,
+    "expected_relevant_titles": [
+      "Submissao de Artigos e Comite Cientifico"
+    ]
+  },
+  {
+    "id": "q11",
+    "query": "como deve ser feita a avaliação dos artigos do simpósio acadêmico?",
+    "category": "submissao_artigos",
+    "is_in_scope": true,
+    "expected_relevant_titles": [
+      "Submissao de Artigos e Comite Cientifico"
+    ]
+  },
+  {
+    "id": "q12",
+    "query": "quem pode compor o comitê de pareceristas na revisão duplo-cega?",
+    "category": "submissao_artigos",
+    "is_in_scope": true,
+    "expected_relevant_titles": [
+      "Submissao de Artigos e Comite Cientifico"
+    ]
+  },
+  {
+    "id": "q13",
+    "query": "qual o horário de funcionamento do restaurante universitário aos finais de semana?",
+    "category": "fora_de_escopo",
+    "is_in_scope": false,
+    "expected_relevant_titles": []
+  },
+  {
+    "id": "q14",
+    "query": "como solicitar bolsa de auxílio permanência ou moradia estudantil?",
+    "category": "fora_de_escopo",
+    "is_in_scope": false,
+    "expected_relevant_titles": []
+  },
+  {
+    "id": "q15",
+    "query": "qual o procedimento para reserva de vagas de estacionamento para visitantes?",
+    "category": "fora_de_escopo",
+    "is_in_scope": false,
+    "expected_relevant_titles": []
+  }
+]
