@@ -332,16 +332,32 @@ def create_task(
     owner: str | None = None,
     deadline: str | datetime | date | None = None,
     session_id: str = "default",
+    allow_duplicate: bool = False,
 ) -> dict[str, Any]:
-    """Cria uma nova tarefa no banco para a sessao informada e retorna seus dados como dicionario."""
+    """Cria uma nova tarefa no banco para a sessao informada ou reutiliza existente se identica."""
     normalized_deadline = normalize_deadline(deadline)
+    cleaned_title = title.strip()
     with get_db_session() as session:
         clean_session = _ensure_session_exists(session, session_id)
         normalized_owner, owner_id = _resolve_user(session, owner)
 
+        if not allow_duplicate:
+            existing = session.scalar(
+                select(TaskModel).where(
+                    TaskModel.session_id == clean_session,
+                    func.lower(TaskModel.title) == cleaned_title.lower(),
+                    TaskModel.owner == normalized_owner,
+                    TaskModel.status == TaskStatus.PENDING.value,
+                )
+            )
+            if existing is not None:
+                task_dict = _task_to_dict(existing)
+                task_dict["is_duplicate"] = True
+                return task_dict
+
         task = TaskModel(
             session_id=clean_session,
-            title=title,
+            title=cleaned_title,
             owner=normalized_owner,
             owner_id=owner_id,
             deadline=normalized_deadline,
@@ -350,7 +366,9 @@ def create_task(
         )
         session.add(task)
         session.flush()
-        return _task_to_dict(task)
+        task_dict = _task_to_dict(task)
+        task_dict["is_duplicate"] = False
+        return task_dict
 
 
 def update_task_by_id(
@@ -407,19 +425,39 @@ def create_decision(
     decision: str,
     reason: str = "",
     session_id: str = "default",
+    allow_duplicate: bool = False,
 ) -> dict[str, Any]:
-    """Registra uma nova decisao do grupo na sessao e retorna um dicionario."""
+    """Registra uma nova decisao do grupo na sessao ou reutiliza existente se identica."""
+    cleaned_decision = decision.strip()
+    cleaned_reason = (reason or "").strip()
     with get_db_session() as session:
         clean_session = _ensure_session_exists(session, session_id)
+        if not allow_duplicate:
+            existing = session.scalar(
+                select(DecisionModel).where(
+                    DecisionModel.session_id == clean_session,
+                    func.lower(DecisionModel.decision) == cleaned_decision.lower(),
+                )
+            )
+            if existing is not None:
+                if cleaned_reason and not existing.reason:
+                    existing.reason = cleaned_reason
+                    session.flush()
+                item_dict = _decision_to_dict(existing)
+                item_dict["is_duplicate"] = True
+                return item_dict
+
         item = DecisionModel(
             session_id=clean_session,
-            decision=decision,
-            reason=reason or "",
+            decision=cleaned_decision,
+            reason=cleaned_reason,
             created_at=_now_dt(),
         )
         session.add(item)
         session.flush()
-        return _decision_to_dict(item)
+        item_dict = _decision_to_dict(item)
+        item_dict["is_duplicate"] = False
+        return item_dict
 
 
 def list_decisions(session_id: str = "default") -> list[dict[str, Any]]:

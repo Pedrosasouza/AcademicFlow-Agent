@@ -127,6 +127,7 @@ AcademicFlow-Agent/
 │   ├── test_database_repository.py    # Testes de ORM, repositório, Alembic e pgvector
 │   ├── test_docker_configuration.py   # Validação de Dockerfile e docker-compose.yml
 │   ├── test_rag_benchmark.py          # Testes unitarios da suite de benchmark do RAG
+│   ├── test_turn_recovery_and_resilience.py # Testes de falha pos-tool, recuperacao e idempotencia
 │   └── test_ui.py                     # Testes da interface Streamlit
 ├── .env.example                       # Exemplo de variáveis de ambiente
 ├── alembic.ini                        # Configuração do Alembic
@@ -249,6 +250,7 @@ O que é coberto em `tests/`:
 - `test_ui.py`: sincronização de estado da interface Streamlit, criação de salas, cadastro de normas no painel lateral e mensagens de erro quando o banco ou o Ollama estão inacessíveis.
 - `test_docker_configuration.py`: verificação de boas práticas no `Dockerfile`, `.dockerignore` e `docker-compose.yml`.
 - `test_rag_benchmark.py`: cálculo determinístico de métricas de recuperação (Precision@k, Recall@k, MRR), detecção de falso positivo para perguntas fora de escopo e geração do relatório técnico.
+- `test_turn_recovery_and_resilience.py`: resiliência do turno quando o LLM falha após a execução de ferramentas, persistência de histórico parcial com aviso de recuperação e idempotência contra duplicatas.
 
 ---
 

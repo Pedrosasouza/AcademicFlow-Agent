@@ -19,7 +19,13 @@ from typing import Annotated, Any
 
 from dotenv import load_dotenv
 from httpx import ConnectError
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
 from langchain_core.tools import tool
 from langchain_ollama import ChatOllama
 from langgraph.graph import MessagesState, START, StateGraph
@@ -161,6 +167,12 @@ def register_task(
         logger.warning("Erro de validacao em register_task: %s", exc)
         return f"Erro de validacao ao criar tarefa: {exc}"
 
+    if task.get("is_duplicate"):
+        return (
+            f"Tarefa #{task['id']} ja existia com os mesmos dados (evitada duplicacao): "
+            f"{task['title']} | responsavel: {task['owner']} | prazo: {task['deadline']}."
+        )
+
     return (
         f"Tarefa #{task['id']} registrada: {task['title']} | "
         f"responsavel: {task['owner']} | prazo: {task['deadline']}."
@@ -212,6 +224,8 @@ def register_decision(decision: ToolStr, reason: ToolStr = "") -> str:
         session_id=get_active_session(),
     )
     reason_text = f" Motivo: {item['reason']}" if item["reason"] else ""
+    if item.get("is_duplicate"):
+        return f"Decisao #{item['id']} ja estava registrada (evitada duplicacao): {item['decision']}.{reason_text}"
     return f"Decisao #{item['id']} registrada: {item['decision']}.{reason_text}"
 
 
@@ -438,14 +452,60 @@ def run_turn(
 
     runner = compiled_agent if compiled_agent is not None else react_event_agent
     final_step: MessagesState | None = None
+    accumulated_steps: list[MessagesState] = []
 
-    for step in runner.stream(
-        {"messages": pending_history},
-        stream_mode="values",
-    ):
-        final_step = step
-        if on_step is not None and len(step["messages"]) > initial_count + 1:
-            on_step(step)
+    try:
+        for step in runner.stream(
+            {"messages": pending_history},
+            stream_mode="values",
+        ):
+            final_step = step
+            accumulated_steps.append(step)
+            if on_step is not None and len(step["messages"]) > initial_count + 1:
+                on_step(step)
+    except Exception as exc:
+        logger.error(
+            "Falha durante a execucao do turno no grafo ReAct (sessao '%s'): %s",
+            session_id,
+            exc,
+            exc_info=True,
+        )
+        if accumulated_steps:
+            last_known_messages = list(accumulated_steps[-1]["messages"][initial_count:])
+            has_tool_message = any(isinstance(m, ToolMessage) for m in last_known_messages)
+            if has_tool_message:
+                recovery_content = (
+                    "A operacao foi executada e registrada no banco de dados, mas ocorreu uma "
+                    "falha de conexao com o modelo antes da conclusao da resposta. "
+                    "Consulte o quadro do projeto para verificar o estado atualizado."
+                )
+            else:
+                recovery_content = (
+                    "Ocorreu uma falha antes da conclusao do processamento pelo modelo. "
+                    "Nenhuma operacao foi concluida."
+                )
+
+            recovery_ai_message = AIMessage(
+                content=recovery_content,
+                additional_kwargs={"is_error_recovery": True, "error_detail": str(exc)},
+            )
+            partial_to_persist = [*last_known_messages, recovery_ai_message]
+            repository.append_messages(
+                partial_to_persist,
+                session_id=session_id,
+                default_author=cleaned_author,
+            )
+        else:
+            fallback_msg = AIMessage(
+                content="Nao foi possivel processar a solicitacao devido a uma falha de conexao.",
+                additional_kwargs={"is_error_recovery": True, "error_detail": str(exc)},
+            )
+            repository.append_messages(
+                [user_message, fallback_msg],
+                session_id=session_id,
+                default_author=cleaned_author,
+            )
+        raise
 
     if final_step is None:
         return []
