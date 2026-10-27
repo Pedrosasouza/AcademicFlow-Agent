@@ -25,6 +25,13 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator, TypeEngine, UserDefinedType
 
 EMBEDDING_DIM = 768
+PGVECTOR_ENABLED: bool = True
+
+
+def set_pgvector_enabled(enabled: bool) -> None:
+    """Atualiza o sinalizador global indicando se o tipo nativo vector(N) esta disponivel no PostgreSQL."""
+    global PGVECTOR_ENABLED
+    PGVECTOR_ENABLED = enabled
 
 
 def format_vector_literal(embedding: Sequence[float]) -> str:
@@ -96,7 +103,7 @@ class PgVectorType(TypeDecorator[list[float]]):
         self.dimensions = dimensions
 
     def load_dialect_impl(self, dialect: Dialect) -> TypeEngine[Any]:
-        if dialect.name == "postgresql":
+        if dialect.name == "postgresql" and PGVECTOR_ENABLED:
             return dialect.type_descriptor(_PgVectorCol(self.dimensions))
         return dialect.type_descriptor(JSON())
 
@@ -107,7 +114,7 @@ class PgVectorType(TypeDecorator[list[float]]):
     ) -> Any:
         if value is None:
             return None
-        if dialect.name == "postgresql":
+        if dialect.name == "postgresql" and PGVECTOR_ENABLED:
             return format_vector_literal(value)
         return [round(float(x), 6) for x in value]
 

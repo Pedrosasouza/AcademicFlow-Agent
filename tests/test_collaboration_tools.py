@@ -232,3 +232,28 @@ def test_search_event_regulations_returns_relevant_university_rules():
 
     assert "Normas e editais encontrados" in result
     assert "Edital" in result or "Regimento" in result or "Auditorio" in result or "auditorio" in result.lower()
+
+
+def test_tools_coerce_nested_dicts_and_string_ids_from_local_llm():
+    """Garante que argumentos enviados como objetos aninhados ou IDs textuais pelo Llama 3.2 sao normalizados."""
+    res_create = agent.register_task.invoke(
+        {
+            "title": "Reservar auditorio principal",
+            "owner": {"name": "Alice"},
+            "deadline": {"value": "sexta-feira"},
+        }
+    )
+    assert "Tarefa #1 registrada" in res_create
+    assert "responsavel: Alice" in res_create
+
+    res_update = agent.update_task.invoke(
+        {
+            "task_id": "#1",
+            "status": {"status": "concluida"},
+            "owner": {"user": "Bob"},
+        }
+    )
+    assert "Tarefa #1 atualizada" in res_update
+    assert "responsavel: Bob" in res_update
+    assert "status: concluida" in res_update
+

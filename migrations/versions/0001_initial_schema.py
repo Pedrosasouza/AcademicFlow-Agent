@@ -12,7 +12,7 @@ from collections.abc import Sequence
 from alembic import op
 import sqlalchemy as sa
 
-from src.models import EMBEDDING_DIM, PgVectorType
+from src.models import EMBEDDING_DIM, PgVectorType, set_pgvector_enabled
 
 revision: str = "0001_initial_schema"
 down_revision: str | None = None
@@ -24,8 +24,16 @@ def upgrade() -> None:
     """Cria as 7 tabelas relacionais com indices, FKs, extensao pgvector e indice HNSW."""
     bind = op.get_bind()
     is_postgres = bind.dialect.name == "postgresql"
+    has_pgvector = False
     if is_postgres:
-        op.execute(sa.text("CREATE EXTENSION IF NOT EXISTS vector"))
+        has_pgvector = bool(
+            bind.execute(
+                sa.text("SELECT 1 FROM pg_available_extensions WHERE name = 'vector'")
+            ).scalar()
+        )
+        set_pgvector_enabled(has_pgvector)
+        if has_pgvector:
+            op.execute(sa.text("CREATE EXTENSION IF NOT EXISTS vector"))
 
     op.create_table(
         "sessions",
@@ -177,7 +185,7 @@ def upgrade() -> None:
         ["source"],
         unique=False,
     )
-    if is_postgres:
+    if is_postgres and has_pgvector:
         op.execute(
             sa.text(
                 "CREATE INDEX IF NOT EXISTS ix_regulation_chunks_embedding_hnsw "

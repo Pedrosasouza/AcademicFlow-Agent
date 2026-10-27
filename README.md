@@ -136,24 +136,32 @@ cd AcademicFlow-Agent
 # 2. Configure as variáveis de ambiente
 cp .env.example .env
 
-# 3. Suba o banco de dados PostgreSQL (escolha UMA das opções abaixo):
+# 3. Crie e ative um ambiente virtual Python limpo e instale as dependências
+python -m venv .venv
+# No Windows (PowerShell):
+.\.venv\Scripts\Activate.ps1
+# No Linux/macOS:
+# source .venv/bin/activate
 
-# Opção 3A — PostgreSQL instalado localmente no Windows (sem Docker):
+pip install -r requirements.txt
+
+# 4. Suba o banco de dados PostgreSQL (escolha UMA das opções abaixo):
+
+# Opção 4A — Via Docker Compose (recomendado, já inclui PostgreSQL 16 + pgvector):
+docker compose up -d postgres
+
+# Opção 4B — PostgreSQL instalado localmente no Windows (sem Docker):
 # Inicie o serviço pelo PowerShell (como Administrador) e crie o banco se ainda não existir:
 net start postgresql-x64-18
 createdb -U postgres academic_flow
 
-# Opção 3B — Via Docker Compose (se possuir Docker instalado):
-docker compose up -d
-
-# 4. Instale as dependências
-pip install -r requirements.txt
-
-# 5. Baixe e inicie os modelos de chat e de embeddings no Ollama
+# 5. Baixe os modelos necessários no Ollama (chat + embeddings) e garanta que o servidor esteja ativo
 ollama pull llama3.2
 ollama pull nomic-embed-text
 ollama serve
 ```
+
+> **Nota sobre migrações e *seed* inicial:** Ao iniciar a aplicação (via Streamlit ou CLI), `init_db()` executa automaticamente as migrações do **Alembic** (`alembic upgrade head`), ativa a extensão `pgvector` (quando disponível) e popula de forma idempotente os participantes (`Alice`, `Bob`, `Charlie`) e as normas institucionais iniciais. Também é possível aplicar as migrações manualmente com `alembic upgrade head`.
 
 ### Variáveis de Ambiente (`.env.example`)
 
@@ -161,12 +169,12 @@ ollama serve
 |:---------|:-------------|:----------|
 | `DATABASE_URL` | `postgresql+psycopg://postgres:postgres@localhost:5432/academic_flow` | String de conexão SQLAlchemy 2.0 |
 | `OLLAMA_MODEL` | `llama3.2` | Modelo conversacional utilizado no Ollama |
-| `OLLAMA_EMBEDDING_MODEL` | `nomic-embed-text` | Modelo de embeddings densos utilizado no RAG |
+| `OLLAMA_EMBEDDING_MODEL` | `nomic-embed-text` | Modelo de embeddings densos (768d) utilizado no RAG |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Endpoint da API local do Ollama |
 
 ### Execução Rápida com Docker Compose (Banco + Interface Web)
 
-Com o [Ollama](https://ollama.com) ativo na máquina hospedeira (`ollama pull llama3.2 && ollama serve`), você pode subir o **PostgreSQL 16** e a **interface Streamlit** com um único comando:
+Com o [Ollama](https://ollama.com) ativo na máquina hospedeira e os modelos baixados (`ollama pull llama3.2 && ollama pull nomic-embed-text && ollama serve`), você pode subir o **PostgreSQL 16 (`pgvector`)** e a **interface Streamlit** containerizada com um único comando:
 
 ```bash
 docker compose up --build -d

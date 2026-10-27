@@ -29,6 +29,7 @@ services:
     environment:
       DATABASE_URL: ${DOCKER_DATABASE_URL:-postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-academic_flow}}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2}
+      OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}
       OLLAMA_BASE_URL: ${DOCKER_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
     ports:
       - "8501:8501"

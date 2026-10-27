@@ -561,13 +561,15 @@ def test_chat_message_persists_author_and_user_id_fk_without_prefix():
 
 
 def test_compute_embedding_logs_warning_on_ollama_connection_error(monkeypatch, caplog):
-    """Garante que falhas de rede no Ollama geram log warning estruturado antes do fallback."""
+    """Garante que falhas de rede ou modelo ausente no Ollama geram log warning antes do fallback."""
     from httpx import ConnectError
+    from ollama import ResponseError
 
     def broken_embedder(**kwargs):
         raise ConnectError("Ollama indisponivel")
 
     monkeypatch.setenv("EMBEDDING_PROVIDER", "ollama")
+    database._get_ollama_embedder.cache_clear()
     monkeypatch.setattr(database, "OllamaEmbeddings", broken_embedder)
 
     with caplog.at_level("WARNING"):
@@ -575,6 +577,14 @@ def test_compute_embedding_logs_warning_on_ollama_connection_error(monkeypatch, 
 
     assert len(vec) == models.EMBEDDING_DIM
     assert "Falha ao gerar embedding via Ollama" in caplog.text
+
+    def missing_model_embedder(**kwargs):
+        raise ResponseError("model 'nomic-embed-text' not found", status_code=404)
+
+    database._get_ollama_embedder.cache_clear()
+    monkeypatch.setattr(database, "OllamaEmbeddings", missing_model_embedder)
+    vec_fallback = database.compute_embedding("texto sem modelo baixado")
+    assert len(vec_fallback) == models.EMBEDDING_DIM
 
 
 def test_upsert_document_section_recovers_from_concurrent_integrity_error(monkeypatch):

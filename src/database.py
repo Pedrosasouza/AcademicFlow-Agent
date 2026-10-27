@@ -20,17 +20,20 @@ from alembic.config import Config
 from dotenv import load_dotenv
 from httpx import ConnectError, HTTPError
 from langchain_ollama import OllamaEmbeddings
+from ollama import RequestError, ResponseError
 from sqlalchemy import Engine, create_engine, inspect, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from src.models import (
+    Base,
     EMBEDDING_DIM,
     RegulationChunkModel,
     SessionModel,
     UserModel,
     format_vector_literal,
+    set_pgvector_enabled,
 )
 
 load_dotenv()
@@ -168,7 +171,14 @@ def compute_embedding(
 
     try:
         return compute_ollama_embedding(text_content, dimensions=dimensions)
-    except (ConnectError, HTTPError) as exc:
+    except (
+        ConnectError,
+        HTTPError,
+        ConnectionError,
+        OSError,
+        RequestError,
+        ResponseError,
+    ) as exc:
         logger.warning(
             "Falha ao gerar embedding via Ollama (%s); utilizando fallback de n-gramas.",
             exc,
@@ -223,6 +233,7 @@ def reset_engine() -> None:
     _engine = None
     _session_factory = None
     _pgvector_enabled = False
+    set_pgvector_enabled(True)
     _get_ollama_embedder.cache_clear()
 
 
@@ -250,18 +261,31 @@ def _enable_pgvector_if_available(engine: Engine) -> None:
     global _pgvector_enabled
     if engine.dialect.name != "postgresql":
         _pgvector_enabled = False
+        set_pgvector_enabled(False)
         return
 
     try:
         with engine.begin() as conn:
+            has_vector = conn.execute(
+                text("SELECT 1 FROM pg_available_extensions WHERE name = 'vector'")
+            ).scalar()
+            if not has_vector:
+                logger.warning(
+                    "Extensao pgvector indisponivel no PostgreSQL; busca vetorial usara fallback em memoria."
+                )
+                _pgvector_enabled = False
+                set_pgvector_enabled(False)
+                return
             conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         _pgvector_enabled = True
+        set_pgvector_enabled(True)
     except SQLAlchemyError as exc:
         logger.warning(
             "Extensao pgvector indisponivel no PostgreSQL (%s); busca vetorial usara fallback em memoria.",
             exc,
         )
         _pgvector_enabled = False
+        set_pgvector_enabled(False)
 
 
 def run_migrations(revision: str = "head") -> None:
@@ -285,6 +309,7 @@ def run_migrations(revision: str = "head") -> None:
                 "Banco pre-existente detectado sem tabela alembic_version; aplicando alembic stamp '%s' sem apagar dados.",
                 revision,
             )
+            Base.metadata.create_all(bind=conn)
             command.stamp(alembic_cfg, revision)
         else:
             command.upgrade(alembic_cfg, revision)

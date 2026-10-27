@@ -15,7 +15,7 @@ from collections.abc import Callable
 from contextvars import ContextVar
 import logging
 import os
-from typing import Any
+from typing import Annotated, Any
 
 from dotenv import load_dotenv
 from httpx import ConnectError
@@ -24,6 +24,8 @@ from langchain_core.tools import tool
 from langchain_ollama import ChatOllama
 from langgraph.graph import MessagesState, START, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
+from ollama import ResponseError
+from pydantic import BeforeValidator, WithJsonSchema
 from sqlalchemy.exc import OperationalError
 
 from src import repository
@@ -76,15 +78,71 @@ def get_users() -> list[str]:
 # =============================================================================
 
 
+def _coerce_tool_str(value: Any) -> str:
+    """Normaliza argumentos textuais das ferramentas caso o LLM local envie None ou objeto aninhado."""
+    if value is None:
+        return ""
+    if isinstance(value, TaskStatus):
+        return value.value
+    if isinstance(value, dict):
+        for key in (
+            "name",
+            "owner",
+            "user",
+            "value",
+            "status",
+            "deadline",
+            "title",
+            "text",
+            "section",
+            "decision",
+            "reason",
+            "query",
+        ):
+            if key in value and value[key] is not None:
+                return str(value[key]).strip()
+        non_null = [str(v).strip() for v in value.values() if v is not None]
+        return non_null[0] if non_null else ""
+    return str(value)
+
+
+def _coerce_tool_int(value: Any) -> int:
+    """Normaliza IDs numericos caso o LLM local envie strings como '#1' ou objetos {'id': 1}."""
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        cleaned = value.strip().lstrip("#").strip()
+        if cleaned.isdigit():
+            return int(cleaned)
+    if isinstance(value, dict):
+        for key in ("task_id", "id", "value"):
+            if key in value and value[key] is not None:
+                return _coerce_tool_int(value[key])
+    return int(value)
+
+
+ToolStr = Annotated[
+    str,
+    BeforeValidator(_coerce_tool_str),
+    WithJsonSchema({"type": "string"}),
+]
+ToolInt = Annotated[
+    int,
+    BeforeValidator(_coerce_tool_int),
+    WithJsonSchema({"type": "integer"}),
+]
+
+
 @tool
 def register_task(
-    title: str,
-    owner: str | None = None,
-    deadline: str | None = None,
+    title: ToolStr,
+    owner: ToolStr = "",
+    deadline: ToolStr = "",
 ) -> str:
     """Register a planning task for the group.
 
     Use this when a participant asks to create, add, assign, or remember a task.
+    Pass owner and deadline as plain strings (e.g. owner='Alice', deadline='sexta-feira').
     """
     cleaned_owner = (owner or "").strip()
     if not cleaned_owner or cleaned_owner.lower() in _SELF_REFERENCES:
@@ -96,7 +154,7 @@ def register_task(
         task = repository.create_task(
             title=title,
             owner=resolved_owner,
-            deadline=deadline,
+            deadline=deadline or None,
             session_id=get_active_session(),
         )
     except ValueError as exc:
@@ -111,10 +169,10 @@ def register_task(
 
 @tool
 def update_task(
-    task_id: int,
-    status: TaskStatus | str | None = None,
-    owner: str | None = None,
-    deadline: str | None = None,
+    task_id: ToolInt,
+    status: ToolStr = "",
+    owner: ToolStr = "",
+    deadline: ToolStr = "",
 ) -> str:
     """Update an existing planning task's status, owner, or deadline.
 
@@ -124,9 +182,9 @@ def update_task(
     try:
         updated = repository.update_task_by_id(
             task_id=task_id,
-            status=status,
-            owner=owner,
-            deadline=deadline,
+            status=status or None,
+            owner=owner or None,
+            deadline=deadline or None,
             session_id=get_active_session(),
         )
     except ValueError as exc:
@@ -143,7 +201,7 @@ def update_task(
 
 
 @tool
-def register_decision(decision: str, reason: str = "") -> str:
+def register_decision(decision: ToolStr, reason: ToolStr = "") -> str:
     """Register an important group decision.
 
     Use this when participants agree on something that should be preserved.
@@ -158,7 +216,7 @@ def register_decision(decision: str, reason: str = "") -> str:
 
 
 @tool
-def update_document_section(section: str, text: str) -> str:
+def update_document_section(section: ToolStr, text: ToolStr) -> str:
     """Create or update a collaborative document section.
 
     Use this when the group asks to draft, rewrite, or save part of the event plan.
@@ -448,7 +506,7 @@ def main() -> None:
                 session_id=active_session,
                 on_step=print_step,
             )
-        except ConnectError:
+        except (ConnectError, ConnectionError, ResponseError):
             print("\nNao consegui conectar ao Ollama.")
             print("Abra outro terminal e execute: ollama serve")
             print("Se o modelo ainda nao existir, execute: ollama pull llama3.2")

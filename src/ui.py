@@ -14,6 +14,7 @@ import sys
 
 from httpx import ConnectError
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from ollama import ResponseError
 from sqlalchemy.exc import OperationalError
 import streamlit as st
 from streamlit.runtime.scriptrunner import get_script_run_ctx
@@ -340,7 +341,7 @@ def render_app() -> None:
                     session_id=active_session,
                     author=sender,
                 )
-            except ConnectError:
+            except (ConnectError, ConnectionError, ResponseError):
                 st.error(
                     "Não consegui conectar ao Ollama. Verifique se o serviço está ativo com `ollama serve` e se o modelo `llama3.2` foi baixado."
                 )
